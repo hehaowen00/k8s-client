@@ -6,7 +6,7 @@
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager, State};
+use tauri::State;
 
 use crate::state::{err, AppState, Result};
 
@@ -34,13 +34,13 @@ pub struct ExtensionInfo {
     error: Option<String>,
 }
 
-pub fn extensions_dir(app: &AppHandle) -> Result<PathBuf> {
-    Ok(app.path().app_config_dir().map_err(err)?.join("extensions"))
+pub fn extensions_dir() -> Result<PathBuf> {
+    Ok(crate::settings::config_dir()?.join("extensions"))
 }
 
 #[tauri::command]
-pub fn list_extensions(app: AppHandle, state: State<'_, AppState>) -> Result<Vec<ExtensionInfo>> {
-    let dir = extensions_dir(&app)?;
+pub fn list_extensions(state: State<'_, AppState>) -> Result<Vec<ExtensionInfo>> {
+    let dir = extensions_dir()?;
     std::fs::create_dir_all(&dir).map_err(err)?;
     let disabled = state.settings.lock().unwrap().disabled_extensions.clone();
     let mut out = Vec::new();
@@ -91,7 +91,7 @@ pub fn list_extensions(app: AppHandle, state: State<'_, AppState>) -> Result<Vec
 }
 
 #[tauri::command]
-pub fn set_extension_enabled(app: AppHandle, state: State<'_, AppState>, id: String, enabled: bool) -> Result<()> {
+pub fn set_extension_enabled(state: State<'_, AppState>, id: String, enabled: bool) -> Result<()> {
     let settings = {
         let mut s = state.settings.lock().unwrap();
         s.disabled_extensions.retain(|d| d != &id);
@@ -100,12 +100,12 @@ pub fn set_extension_enabled(app: AppHandle, state: State<'_, AppState>, id: Str
         }
         s.clone()
     };
-    crate::settings::save(&app, &settings)
+    crate::settings::save(&settings)
 }
 
 #[tauri::command]
-pub fn extensions_folder(app: AppHandle) -> Result<String> {
-    let dir = extensions_dir(&app)?;
+pub fn extensions_folder() -> Result<String> {
+    let dir = extensions_dir()?;
     std::fs::create_dir_all(&dir).map_err(err)?;
     Ok(dir.to_string_lossy().to_string())
 }

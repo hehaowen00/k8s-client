@@ -27,8 +27,9 @@ pub fn run() {
         .setup(|app| {
             use tauri::Manager;
             let st = app.state::<state::AppState>();
-            *st.settings.lock().unwrap() = settings::load(app.handle());
-            *st.managed_dir.lock().unwrap() = settings::managed_dir(app.handle()).ok();
+            settings::migrate_legacy(app.handle());
+            *st.settings.lock().unwrap() = settings::load();
+            *st.managed_dir.lock().unwrap() = settings::managed_dir().ok();
             settings::restart_watcher(app.handle());
             Ok(())
         })

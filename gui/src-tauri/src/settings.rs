@@ -1,4 +1,4 @@
-//! Persistent app settings (settings.json in the app config dir), kubeconfigs
+//! Persistent app settings (~/.config/kube-portal/settings.db), kubeconfigs
 //! pasted into Kube Portal, and a file watcher that notifies the UI when any
 //! kubeconfig source changes.
 
@@ -69,29 +69,67 @@ impl Default for Settings {
     }
 }
 
-fn settings_path(app: &AppHandle) -> Result<PathBuf> {
-    Ok(app.path().app_config_dir().map_err(err)?.join("settings.json"))
+/// ~/.config/kube-portal: settings.db, pasted kubeconfigs, extensions.
+pub fn config_dir() -> Result<PathBuf> {
+    let base = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
+        .ok_or("no home directory")?;
+    Ok(base.join("kube-portal"))
+}
+
+fn open_db() -> Result<rusqlite::Connection> {
+    let dir = config_dir()?;
+    std::fs::create_dir_all(&dir).map_err(err)?;
+    let db = rusqlite::Connection::open(dir.join("settings.db")).map_err(err)?;
+    db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)", [])
+        .map_err(err)?;
+    Ok(db)
 }
 
 /// Folder holding kubeconfigs added through "Add cluster"; always scanned.
-pub fn managed_dir(app: &AppHandle) -> Result<PathBuf> {
-    Ok(app.path().app_config_dir().map_err(err)?.join("kubeconfigs"))
+pub fn managed_dir() -> Result<PathBuf> {
+    Ok(config_dir()?.join("kubeconfigs"))
 }
 
-pub fn load(app: &AppHandle) -> Settings {
-    settings_path(app)
+/// One-time move from the old per-OS app config dir (settings.json, kubeconfigs/, extensions/).
+pub fn migrate_legacy(app: &AppHandle) {
+    let (Ok(old), Ok(new)) = (app.path().app_config_dir(), config_dir()) else { return };
+    let _ = std::fs::create_dir_all(&new);
+    for name in ["kubeconfigs", "extensions"] {
+        if old.join(name).is_dir() && !new.join(name).exists() {
+            let _ = std::fs::rename(old.join(name), new.join(name));
+        }
+    }
+    let json = old.join("settings.json");
+    let Ok(text) = std::fs::read_to_string(&json) else { return };
+    let Ok(db) = open_db() else { return };
+    let has_row = db.query_row("SELECT 1 FROM kv WHERE key = 'settings'", [], |_| Ok(())).is_ok();
+    if !has_row {
+        if let Ok(s) = serde_json::from_str::<Settings>(&text) {
+            if save(&s).is_err() {
+                return;
+            }
+        }
+    }
+    let _ = std::fs::rename(&json, old.join("settings.json.migrated"));
+}
+
+pub fn load() -> Settings {
+    open_db()
         .ok()
-        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|db| db.query_row("SELECT value FROM kv WHERE key = 'settings'", [], |r| r.get::<_, String>(0)).ok())
         .and_then(|s| serde_json::from_str::<Settings>(&s).ok())
         .unwrap_or_default()
 }
 
-pub fn save(app: &AppHandle, s: &Settings) -> Result<()> {
-    let path = settings_path(app)?;
-    if let Some(dir) = path.parent() {
-        std::fs::create_dir_all(dir).map_err(err)?;
-    }
-    std::fs::write(&path, serde_json::to_string_pretty(s).map_err(err)?).map_err(err)
+pub fn save(s: &Settings) -> Result<()> {
+    let json = serde_json::to_string(s).map_err(err)?;
+    open_db()?
+        .execute("INSERT INTO kv (key, value) VALUES ('settings', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value", [json])
+        .map_err(err)?;
+    Ok(())
 }
 
 pub fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
@@ -116,9 +154,12 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 }
 
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, state: State<'_, AppState>, settings: Settings) -> Result<Settings> {
+pub async fn save_settings(state: State<'_, AppState>, mut settings: Settings) -> Result<Settings> {
     let previous = state.settings.lock().unwrap().clone();
-    save(&app, &settings)?;
+    // Owned by their own commands; the UI's copy can be stale and would wipe them.
+    settings.kubeconfig_folders = previous.kubeconfig_folders.clone();
+    settings.disabled_extensions = previous.disabled_extensions.clone();
+    save(&settings)?;
     *state.settings.lock().unwrap() = settings.clone();
     // Proxy changes need a fresh client.
     for (id, c) in &settings.clusters {
@@ -126,16 +167,12 @@ pub async fn save_settings(app: AppHandle, state: State<'_, AppState>, settings:
             state.reset(id).await;
         }
     }
-    if previous.kubeconfig_folders != settings.kubeconfig_folders {
-        state.rescan().await;
-        restart_watcher(&app);
-    }
     Ok(settings)
 }
 
 /// Save a pasted kubeconfig into Kube Portal's own folder and return the contexts it added.
 #[tauri::command]
-pub async fn add_kubeconfig(app: AppHandle, state: State<'_, AppState>, name: String, yaml: String) -> Result<Vec<String>> {
+pub async fn add_kubeconfig(state: State<'_, AppState>, name: String, yaml: String) -> Result<Vec<String>> {
     let kc = Kubeconfig::from_yaml(&yaml).map_err(|e| format!("not a valid kubeconfig: {e}"))?;
     if kc.contexts.is_empty() {
         return Err("the kubeconfig has no contexts".into());
@@ -146,7 +183,7 @@ pub async fn add_kubeconfig(app: AppHandle, state: State<'_, AppState>, name: St
         .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' })
         .collect();
     let safe = if safe.trim_matches('-').is_empty() { "cluster".to_string() } else { safe };
-    let dir = managed_dir(&app)?;
+    let dir = managed_dir()?;
     std::fs::create_dir_all(&dir).map_err(err)?;
     let mut path = dir.join(format!("{safe}.yaml"));
     let mut n = 2;
@@ -161,8 +198,8 @@ pub async fn add_kubeconfig(app: AppHandle, state: State<'_, AppState>, name: St
 
 /// Delete a kubeconfig that was added through Kube Portal (only files in the managed folder).
 #[tauri::command]
-pub async fn remove_added_kubeconfig(app: AppHandle, state: State<'_, AppState>, path: String) -> Result<()> {
-    let dir = managed_dir(&app)?.canonicalize().map_err(err)?;
+pub async fn remove_added_kubeconfig(state: State<'_, AppState>, path: String) -> Result<()> {
+    let dir = managed_dir()?.canonicalize().map_err(err)?;
     let file = PathBuf::from(&path).canonicalize().map_err(err)?;
     if file.parent() != Some(dir.as_path()) {
         return Err("only kubeconfigs added in Kube Portal can be removed here".into());
@@ -182,7 +219,7 @@ pub struct KubeconfigWatcher(pub Mutex<Option<RecommendedWatcher>>);
 pub fn restart_watcher(app: &AppHandle) {
     let state = app.state::<AppState>();
     let mut dirs: Vec<PathBuf> = state.settings.lock().unwrap().kubeconfig_folders.clone();
-    if let Ok(m) = managed_dir(app) {
+    if let Ok(m) = managed_dir() {
         let _ = std::fs::create_dir_all(&m);
         dirs.push(m);
     }
