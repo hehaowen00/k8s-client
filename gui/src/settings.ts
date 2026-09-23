@@ -1,0 +1,98 @@
+import { create } from "zustand";
+import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
+import { useEffect, useState as useStateCompat } from "react";
+import { api, type ContextInfo } from "./api";
+import { useAsync } from "./hooks";
+
+export interface ClusterSettings {
+  displayName?: string | null;
+  color?: string | null;
+  defaultNamespace?: string | null;
+  accessibleNamespaces: string[];
+  proxyUrl?: string | null;
+  pinned: boolean;
+}
+
+export interface Settings {
+  kubeconfigFolders: string[];
+  clusters: Record<string, ClusterSettings>;
+  theme: "system" | "dark" | "light";
+  helmPath?: string | null;
+  kubectlPath?: string | null;
+  kubectlAuto: boolean;
+  terminalShell?: string | null;
+  terminalFontSize: number;
+  updateEndpoint?: string | null;
+  updatePubkey?: string | null;
+}
+
+export const EMPTY_CLUSTER: ClusterSettings = { accessibleNamespaces: [], pinned: false };
+/** Stable empty map for selectors (a fresh `{}` each call makes zustand re-render forever). */
+export const NO_CLUSTERS: Record<string, ClusterSettings> = {};
+
+interface SettingsState {
+  settings: Settings | null;
+  /** Bumped whenever kubeconfig sources change, so context lists reload. */
+  contextsVersion: number;
+  load: () => Promise<void>;
+  save: (s: Settings) => Promise<void>;
+  updateCluster: (ctx: string, patch: Partial<ClusterSettings>) => Promise<void>;
+}
+
+export const useSettings = create<SettingsState>((set, get) => ({
+  settings: null,
+  contextsVersion: 0,
+  load: async () => set({ settings: await invoke<Settings>("get_settings") }),
+  save: async (s) => {
+    const saved = await invoke<Settings>("save_settings", { settings: s });
+    set({ settings: saved });
+  },
+  updateCluster: async (ctx, patch) => {
+    const s = get().settings;
+    if (!s) return;
+    const cur = s.clusters[ctx] ?? EMPTY_CLUSTER;
+    await get().save({ ...s, clusters: { ...s.clusters, [ctx]: { ...cur, ...patch } } });
+  },
+}));
+
+export const clusterSettings = (ctx: string): ClusterSettings =>
+  useSettings.getState().settings?.clusters[ctx] ?? EMPTY_CLUSTER;
+
+export function bumpContexts() {
+  useSettings.setState((s) => ({ contextsVersion: s.contextsVersion + 1 }));
+}
+
+/** Load settings once and follow kubeconfig file changes. */
+export function useSettingsBootstrap() {
+  const load = useSettings((s) => s.load);
+  useEffect(() => {
+    load().catch(() => {});
+    const un = listen("kubeconfigs-changed", () => bumpContexts());
+    return () => {
+      un.then((f) => f());
+    };
+  }, [load]);
+}
+
+/** Contexts from every kubeconfig source; refreshes when files change. */
+export function useContexts() {
+  const version = useSettings((s) => s.contextsVersion);
+  return useAsync<ContextInfo[]>(() => api.listContexts(), [version]);
+}
+
+/** "dark" | "light" after resolving "system" against the OS preference. */
+export function useResolvedTheme(): "dark" | "light" {
+  const pref = useSettings((s) => s.settings?.theme ?? "system");
+  const [system, setSystem] = useStateCompat<"dark" | "light">(() =>
+    window.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark",
+  );
+  useEffect(() => {
+    const mq = window.matchMedia?.("(prefers-color-scheme: light)");
+    if (!mq) return;
+    const on = () => setSystem(mq.matches ? "light" : "dark");
+    mq.addEventListener("change", on);
+    return () => mq.removeEventListener("change", on);
+  }, [setSystem]);
+  return pref === "system" ? system : pref;
+}

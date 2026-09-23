@@ -1,0 +1,6 @@
+{
+  "name": "Image Inventory",
+  "version": "1.0.0",
+  "description": "Example extension: lists container images, adds an Images panel to workloads and a Copy Images action.",
+  "main": "index.js"
+}

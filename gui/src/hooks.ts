@@ -1,0 +1,83 @@
+import { useCallback, useEffect, useState } from "react";
+import { api, type ResourceInfo } from "./api";
+
+const discoveryCache = new Map<string, Promise<ResourceInfo[]>>();
+
+export function loadDiscovery(context: string, refresh = false): Promise<ResourceInfo[]> {
+  if (refresh || !discoveryCache.has(context)) {
+    const p = api.discover(context, refresh);
+    p.catch(() => discoveryCache.delete(context));
+    discoveryCache.set(context, p);
+  }
+  return discoveryCache.get(context)!;
+}
+
+export function forgetContext(context: string) {
+  discoveryCache.delete(context);
+  namespaceCache.delete(context);
+}
+
+/** Generic async loader with reload. */
+export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
+  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean }>({ loading: true });
+  const [nonce, setNonce] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    setState((s) => ({ ...s, loading: true, error: undefined }));
+    fn().then(
+      (data) => !cancelled && setState({ data, loading: false }),
+      (e) => !cancelled && setState({ error: String(e), loading: false }),
+    );
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, nonce]);
+  const reload = useCallback(() => setNonce((n) => n + 1), []);
+  return { ...state, reload };
+}
+
+export function useDiscovery(context: string | null) {
+  return useAsync(() => (context ? loadDiscovery(context) : Promise.resolve([])), [context]);
+}
+
+const namespaceCache = new Map<string, Promise<string[]>>();
+export function useNamespaces(context: string | null) {
+  return useAsync(() => {
+    if (!context) return Promise.resolve([]);
+    if (!namespaceCache.has(context)) {
+      const p = api.listNamespaces(context);
+      p.catch(() => namespaceCache.delete(context));
+      namespaceCache.set(context, p);
+    }
+    return namespaceCache.get(context)!;
+  }, [context]);
+}
+
+export function refreshNamespaces(context: string) {
+  namespaceCache.delete(context);
+}
+
+/** localStorage-backed state for small UI preferences. */
+export function usePref<T>(key: string, initial: T): [T, (v: T) => void] {
+  const [v, setV] = useState<T>(() => {
+    try {
+      const raw = localStorage.getItem(`kubetab.pref.${key}`);
+      return raw === null ? initial : (JSON.parse(raw) as T);
+    } catch {
+      return initial;
+    }
+  });
+  const set = useCallback(
+    (nv: T) => {
+      setV(nv);
+      try {
+        localStorage.setItem(`kubetab.pref.${key}`, JSON.stringify(nv));
+      } catch {
+        /* ignore */
+      }
+    },
+    [key],
+  );
+  return [v, set];
+}
