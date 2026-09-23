@@ -279,7 +279,7 @@ pub async fn add_kubeconfig_folder(
         }
         s.clone()
     };
-    crate::settings::save(&app, &settings)?;
+    crate::settings::save(&settings)?;
     crate::settings::restart_watcher(&app);
     Ok(state.rescan().await.1)
 }
@@ -295,7 +295,7 @@ pub async fn remove_kubeconfig_folder(
         s.kubeconfig_folders.retain(|f| f != Path::new(&path));
         s.clone()
     };
-    crate::settings::save(&app, &settings)?;
+    crate::settings::save(&settings)?;
     crate::settings::restart_watcher(&app);
     Ok(state.rescan().await.1)
 }
