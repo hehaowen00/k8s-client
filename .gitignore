@@ -1,0 +1,7 @@
+gui/src-tauri/binaries/
+gui/src-tauri/target/
+node_modules/
+dist/
+vendor/
+.cluster-cache/
+*.log
