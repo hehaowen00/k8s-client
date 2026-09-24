@@ -75,10 +75,12 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   const [timestamps, setTimestamps] = usePref("logs.timestamps", false);
   const [since, setSince] = usePref("logs.since", 0);
   const [wrap, setWrap] = usePref("logs.wrap", false);
+  const [showPod, setShowPod] = usePref("logs.showPod", false);
   const [previous, setPrevious] = useState(false);
   const [follow, setFollow] = useState(true);
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState(false);
+  const [regex, setRegex] = usePref("logs.regex", false);
   const [podFilter, setPodFilter] = useState("");
   const [status, setStatus] = useState<{ state: "connecting" | "streaming" | "ended" | "error"; message?: string }>({
     state: "connecting",
@@ -169,17 +171,26 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     if (l.src < 0) return "";
     const s = srcList[l.src];
     if (!workload) return s.container;
+    if (!showPod) return showContainer ? s.container : "";
     return showContainer ? `${s.pod}/${s.container}` : s.pod;
   };
 
-  const q = search.toLowerCase();
+  // `test` has no g flag (stateless .test); highlight builds its own global copy. Invalid regex → null + error.
+  const { test, searchError } = useMemo(() => {
+    if (!search) return { test: null, searchError: null };
+    try {
+      return { test: new RegExp(regex ? search : search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), searchError: null };
+    } catch (e) {
+      return { test: null, searchError: (e as Error).message };
+    }
+  }, [search, regex]);
   const shown = useMemo(() => {
     let all = linesRef.current;
     if (podFilter) all = all.filter((l) => l.src >= 0 && srcList[l.src].pod === podFilter);
-    if (q && filterMode) all = all.filter((l) => l.text.toLowerCase().includes(q));
+    if (test && filterMode) all = all.filter((l) => test.test(l.text));
     return all;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, q, filterMode, podFilter]);
+  }, [version, test, filterMode, podFilter]);
 
   // Virtual list
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -228,7 +239,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   const end = Math.min(shown.length, Math.ceil((scroll.top + scroll.height) / LINE_HEIGHT) + 20);
 
   const renderText = (line: Line) => {
-    if (q) return highlight(line.text);
+    if (test) return highlight(line.text);
     if (line.raw)
       return parseAnsi(line.raw).map((seg, i) =>
         seg.style ? (
@@ -242,15 +253,13 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     return line.text;
   };
   const highlight = (line: string) => {
-    if (!q) return line;
-    const lower = line.toLowerCase();
+    if (!test) return line;
     const parts: React.ReactNode[] = [];
     let i = 0;
-    let idx = lower.indexOf(q);
-    while (idx >= 0) {
-      parts.push(line.slice(i, idx), <mark key={idx}>{line.slice(idx, idx + q.length)}</mark>);
-      i = idx + q.length;
-      idx = lower.indexOf(q, i);
+    for (const m of line.matchAll(new RegExp(test.source, "gi"))) {
+      if (!m[0]) continue; // zero-length match (e.g. `a*`): nothing to mark
+      parts.push(line.slice(i, m.index), <mark key={m.index}>{m[0]}</mark>);
+      i = m.index + m[0].length;
     }
     parts.push(line.slice(i));
     return parts;
@@ -258,7 +267,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
 
   const title = workload ? `${workload.kind.toLowerCase()}/${workload.name}` : tab.pod;
   const download = () => {
-    const text = linesRef.current.map((l) => (l.src >= 0 ? `[${prefix(l)}] ${l.text}` : l.text)).join("\n");
+    const text = linesRef.current.map((l) => (prefix(l) ? `[${prefix(l)}] ${l.text}` : l.text)).join("\n");
     const a = document.createElement("a");
     a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
     a.download = `${(title ?? "logs").replace("/", "-")}${container && container !== ALL ? "-" + container : ""}.log`;
@@ -266,11 +275,29 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     URL.revokeObjectURL(a.href);
   };
 
-  const matchCount = useMemo(
-    () => (q ? linesRef.current.reduce((n, l) => (l.text.toLowerCase().includes(q) ? n + 1 : n), 0) : 0),
+  // Indices into `shown` of matching lines (wrap mode only renders the newest WRAP_LIMIT).
+  const wrapOffset = wrap ? Math.max(0, shown.length - WRAP_LIMIT) : 0;
+  const matches = useMemo(() => {
+    const out: number[] = [];
+    if (test) for (let i = wrapOffset; i < shown.length; i++) if (test.test(shown[i].text)) out.push(i);
+    return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [version, q],
-  );
+  }, [version, shown, test, wrapOffset]);
+  // ponytail: position is by match number, so it drifts when old lines are trimmed past MAX_LINES.
+  const [cur, setCur] = useState<number | null>(null);
+  useEffect(() => setCur(null), [test]);
+  const curLine = cur !== null && cur < matches.length ? matches[cur] : -1;
+  const goToMatch = (d: 1 | -1) => {
+    const n = matches.length;
+    const el = scrollRef.current;
+    if (!n || !el) return;
+    const next = cur === null || cur >= n ? (d > 0 ? 0 : n - 1) : (cur + d + n) % n;
+    setCur(next);
+    setFollow(false);
+    const idx = matches[next];
+    if (wrap) el.querySelector(`[data-line="${idx}"]`)?.scrollIntoView({ block: "center" });
+    else el.scrollTop = idx * LINE_HEIGHT - el.clientHeight / 2;
+  };
   const streaming = sources.filter((s) => s.state === "streaming").length;
 
   return (
@@ -328,12 +355,43 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
             </option>
           ))}
         </Select>
-        <input className="input filter" placeholder="Search…" value={search} onChange={(e) => setSearch(e.target.value)} />
-        {search && <span className="muted small">{matchCount} matches</span>}
+        <input
+          className="input filter"
+          placeholder="Search…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              goToMatch(e.shiftKey ? -1 : 1);
+            }
+          }}
+        />
+        {searchError ? (
+          <span className="tone-bad small" title={searchError}>Invalid regex</span>
+        ) : (
+          search && (
+            <>
+              <span className="muted small">
+                {curLine >= 0 ? `${cur! + 1} of ${matches.length}` : `${matches.length} matches`}
+              </span>
+              <button className="btn btn-sm btn-icon" disabled={!matches.length} onClick={() => goToMatch(-1)} title="Previous match (Shift+Enter)">
+                ↑
+              </button>
+              <button className="btn btn-sm btn-icon" disabled={!matches.length} onClick={() => goToMatch(1)} title="Next match (Enter)">
+                ↓
+              </button>
+            </>
+          )
+        )}
+        <Checkbox checked={regex} onChange={(e) => setRegex(e.target.checked)}>Regex</Checkbox>
         <Checkbox checked={filterMode} onChange={(e) => setFilterMode(e.target.checked)}>Only matches</Checkbox>
         <Checkbox checked={timestamps} onChange={(e) => setTimestamps(e.target.checked)}>Timestamps</Checkbox>
         {!multi && (
           <Checkbox checked={previous} onChange={(e) => setPrevious(e.target.checked)}>Previous</Checkbox>
+        )}
+        {workload && (
+          <Checkbox checked={showPod} onChange={(e) => setShowPod(e.target.checked)}>Pod name</Checkbox>
         )}
         <Checkbox checked={wrap} onChange={(e) => setWrap(e.target.checked)}>Wrap</Checkbox>
         <Checkbox checked={follow} onChange={(e) => setFollow(e.target.checked)}>Follow</Checkbox>
@@ -385,8 +443,8 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
               </div>
             )}
             {shown.slice(-WRAP_LIMIT).map((line, i) => (
-              <div key={i} className="log-line wrapped">
-                {line.src >= 0 && (
+              <div key={i} data-line={wrapOffset + i} className={`log-line wrapped${wrapOffset + i === curLine ? " current" : ""}`}>
+                {prefix(line) && (
                   <span className="log-src" style={{ color: srcList[line.src].color }}>
                     {prefix(line)}
                   </span>
@@ -398,8 +456,8 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
         ) : (
           <div style={{ height: shown.length * LINE_HEIGHT, position: "relative", minWidth: "100%" }}>
             {shown.slice(start, end).map((line, i) => (
-              <div key={start + i} className="log-line" style={{ top: (start + i) * LINE_HEIGHT, height: LINE_HEIGHT }}>
-                {line.src >= 0 && (
+              <div key={start + i} className={`log-line${start + i === curLine ? " current" : ""}`} style={{ top: (start + i) * LINE_HEIGHT, height: LINE_HEIGHT }}>
+                {prefix(line) && (
                   <span className="log-src" style={{ color: srcList[line.src].color }}>
                     {prefix(line)}
                   </span>

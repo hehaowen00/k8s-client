@@ -3,7 +3,7 @@ import { api, type ResourceInfo, type Row } from "../api";
 import { openDetail } from "../actions";
 import { forgetContext, loadDiscovery, refreshNamespaces, useDiscovery, useNamespaces, usePref } from "../hooks";
 import { useContexts } from "../settings";
-import { contextColor, openSession, openSingleton, pluralLabel, useTabs, type Tab, contextLabel } from "../store";
+import { contextColor, openSession, openSingleton, pluralLabel, useTabs, type Tab, contextLabel, initialNamespace } from "../store";
 import { ALL_NAMESPACES, buildSections, nsForApi, nsSelection, sameResource } from "../util";
 import { ResourceTable } from "./ResourceTable";
 import { DetailView } from "./DetailView";
@@ -118,7 +118,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
           <Select
             className="select context-select"
             value={tab.context}
-            onChange={(e) => update(tab.id, { context: e.target.value, resource: null, namespace: "" })}
+            onChange={(e) => update(tab.id, { context: e.target.value, resource: null, namespace: initialNamespace(e.target.value) })}
           >
             {!contexts.data?.some((c) => c.name === tab.context) && <option value={tab.context}>{contextLabel(tab.context)}</option>}
             {contexts.data?.map((c) => (
@@ -271,12 +271,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
             </div>
             <div className="content-split">
               {tab.resource.namespaced && nsSelection(tab.namespace).none ? (
-                <NoNamespace
-                  namespaces={namespaces.data ?? []}
-                  loading={namespaces.loading}
-                  plural={pluralLabel(tab.resource)}
-                  onPick={(ns) => update(tab.id, { namespace: ns })}
-                />
+                <div className="no-ns" />
               ) : (
               <ResourceTable
                 key={`${tab.context}|${tab.resource.group}/${tab.resource.kind}|${tab.namespace}`}
@@ -406,43 +401,5 @@ function ExtPageView({ page, context, namespace }: { page?: ExtPage; context: st
       {error && <div className="error-box">{error}</div>}
       <div className="ext-page" ref={ref} />
     </>
-  );
-}
-
-/** Shown for namespaced kinds until a namespace is picked. */
-function NoNamespace({
-  namespaces,
-  loading,
-  plural,
-  onPick,
-}: {
-  namespaces: string[];
-  loading: boolean;
-  plural: string;
-  onPick: (ns: string) => void;
-}) {
-  const [q, setQ] = useState("");
-  const shown = namespaces.filter((n) => !q || n.includes(q.toLowerCase()));
-  return (
-    <div className="no-ns">
-      <div className="no-ns-inner">
-        <h3>Choose a namespace</h3>
-        <p className="muted">Pick a namespace to list {plural}, or show every namespace.</p>
-        <div className="no-ns-actions">
-          <button className="btn btn-sm btn-primary" onClick={() => onPick(ALL_NAMESPACES)}>
-            All namespaces
-          </button>
-          {namespaces.length > 8 && <input className="input" placeholder="Filter namespaces…" value={q} onChange={(e) => setQ(e.target.value)} />}
-        </div>
-        {loading && <div className="muted small">Loading namespaces…</div>}
-        <div className="no-ns-list">
-          {shown.map((n) => (
-            <button key={n} className="chip-btn" onClick={() => onPick(n)}>
-              {n}
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
   );
 }

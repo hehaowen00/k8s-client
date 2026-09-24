@@ -37,12 +37,14 @@ export function TabBar() {
         }}
       >
         {tabs.map((t, i) => {
+          // The "New Tab" page lives behind the + button, not in the strip.
+          if (t.kind === "home") return null;
           const ctx = tabContext(t);
           return (
             <div
               key={t.id}
               className={`tab ${t.id === activeId ? "active" : ""} ${t.id === splitId ? "split" : ""} ${overIdx === i && dragIdx !== i ? "drop-target" : ""}`}
-              title={ctx ? `${tabTitle(t)} — ${contextLabel(ctx)}` : tabTitle(t)}
+              title={ctx && t.kind !== "cluster" ? `${tabTitle(t)} — ${contextLabel(ctx)}` : tabTitle(t)}
               draggable
               onDragStart={(e) => {
                 setDragIdx(i);
@@ -101,7 +103,10 @@ export function TabBar() {
           );
         })}
       </div>
-      <button className="tab-new" title="New tab (Ctrl+T)" onClick={() => open({ kind: "home" })}>
+      <button
+        className={`tab-new ${tabs.find((t) => t.id === activeId)?.kind === "home" ? "active" : ""}`}
+        title="New tab (Ctrl+T)"
+        onClick={() => open({ kind: "home" })}>
         +
       </button>
     </div>
