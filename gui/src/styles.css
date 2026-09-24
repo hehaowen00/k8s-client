@@ -1060,6 +1060,21 @@ mark {
   width: 100%;
   margin-bottom: 14px;
 }
+.modal-slider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+.modal-slider input {
+  flex: 1;
+  accent-color: var(--accent);
+}
+.modal-slider output {
+  min-width: 3ch;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;

@@ -121,7 +121,9 @@ export async function scaleTarget(t: Target, current?: number) {
     title: `Scale ${t.resource.kind}`,
     message: `Replicas for ${t.name}:`,
     initial: String(current ?? 1),
-    inputType: "number",
+    inputType: "range",
+    // ponytail: fixed headroom; add a typed-in fallback if people need to jump past 2x
+    max: Math.max(10, (current ?? 1) * 2),
   });
   if (v === null) return;
   const n = Number(v);

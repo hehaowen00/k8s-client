@@ -16,6 +16,7 @@ type Dialog =
       message: string;
       initial: string;
       inputType?: string;
+      max?: number;
       resolve: (v: string | null) => void;
     };
 
@@ -46,6 +47,8 @@ export function promptDialog(opts: {
   message: string;
   initial?: string;
   inputType?: string;
+  /** Upper bound for inputType "range". */
+  max?: number;
 }): Promise<string | null> {
   return new Promise((resolve) =>
     useDialogs.setState({
@@ -73,7 +76,7 @@ export function DialogHost() {
   useEffect(() => {
     if (dialog?.type === "prompt") {
       setValue(dialog.initial);
-      setTimeout(() => inputRef.current?.select(), 0);
+      setTimeout(() => (dialog.inputType === "range" ? inputRef.current?.focus() : inputRef.current?.select()), 0);
     } else if (dialog) {
       setTimeout(() => okRef.current?.focus(), 0);
     }
@@ -101,7 +104,26 @@ export function DialogHost() {
           >
             <h3>{dialog.title}</h3>
             <p>{dialog.message}</p>
-            {dialog.type === "prompt" && (
+            {dialog.type === "prompt" && dialog.inputType === "range" ? (
+              <div className="modal-slider">
+                <input
+                  ref={inputRef}
+                  type="range"
+                  min={0}
+                  max={dialog.max ?? 10}
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  // Range inputs don't implicitly submit on Enter.
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      finish(true);
+                    }
+                  }}
+                />
+                <output>{value}</output>
+              </div>
+            ) : dialog.type === "prompt" && (
               <input
                 ref={inputRef}
                 className="input"
