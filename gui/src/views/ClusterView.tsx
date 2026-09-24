@@ -9,6 +9,7 @@ import { ResourceTable } from "./ResourceTable";
 import { DetailView } from "./DetailView";
 import { OverviewView } from "./OverviewView";
 import { Dock } from "../components/Dock";
+import { Drawer } from "../components/Drawer";
 import { HelmCharts, HelmReleases } from "./HelmViews";
 import { NamespacePicker } from "../components/NamespacePicker";
 import { useExtensions, type ExtPage } from "../extensions";
@@ -293,7 +294,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
               />
               )}
               {selected && (
-                <div className="drawer">
+                <Drawer>
                   <DetailView
                     key={selected.uid}
                     context={tab.context}
@@ -304,7 +305,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
                     compact
                     onClose={() => setSelected(null)}
                   />
-                </div>
+                </Drawer>
               )}
             </div>
           </>

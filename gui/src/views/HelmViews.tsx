@@ -12,6 +12,7 @@ import { YamlEditor } from "../components/YamlEditor";
 import { confirmDialog, toast } from "../components/Dialogs";
 import { openContextMenu } from "../components/ContextMenu";
 import { Select } from "../components/Select";
+import { Drawer } from "../components/Drawer";
 import { Checkbox } from "../components/Checkbox";
 
 /** "podinfo-6.14.1" -> ["podinfo", "6.14.1"] */
@@ -163,7 +164,7 @@ export function HelmReleases({ context, namespace, active, onNamespace }: { cont
           )}
         </div>
         {selected && (
-          <div className="drawer">
+          <Drawer>
             <ReleaseDetail
               key={`${selected.namespace}/${selected.name}`}
               context={context}
@@ -172,7 +173,7 @@ export function HelmReleases({ context, namespace, active, onNamespace }: { cont
               onChanged={reload}
               onUninstall={() => uninstall(selected)}
             />
-          </div>
+          </Drawer>
         )}
       </div>
     </>
@@ -588,9 +589,9 @@ export function HelmCharts({ context, active }: { context: string; active: boole
           )}
         </div>
         {selected && (
-          <div className="drawer">
+          <Drawer>
             <ChartDetail key={selected.name} context={context} chart={selected} onClose={() => setSelected(null)} />
-          </div>
+          </Drawer>
         )}
       </div>
     </>
