@@ -116,8 +116,10 @@ export function Select({ value, onChange, children, className, title, disabled, 
       if (!popRef.current?.contains(t) && !buttonRef.current?.contains(t)) close(false);
     };
     const onScroll = (e: Event) => {
-      // Scrolling the list itself is fine; scrolling the page moves the anchor.
-      if (!popRef.current?.contains(e.target as Node)) close(false);
+      // Only close when the scroll moved the anchor (an ancestor of the button scrolled), not for
+      // unrelated scrollers like a log view auto-following new lines.
+      const t = e.target as Node;
+      if (buttonRef.current && t.contains?.(buttonRef.current)) close(false);
     };
     const onBlur = () => close(false);
     window.addEventListener("mousedown", onDown, true);

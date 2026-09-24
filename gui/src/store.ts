@@ -90,6 +90,36 @@ interface TabsState {
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 
+/** Last namespace picked per context, so new cluster tabs reopen where you left off (survives restarts). */
+const LAST_NS_KEY = "kubetab.lastNamespace";
+function lastNamespaces(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(LAST_NS_KEY) ?? "{}");
+  } catch {
+    return {};
+  }
+}
+function rememberNamespace(context: string, ns: string) {
+  try {
+    localStorage.setItem(LAST_NS_KEY, JSON.stringify({ ...lastNamespaces(), [context]: ns }));
+  } catch {
+    /* ignore */
+  }
+}
+/** Record cluster tabs' namespaces (all of them at startup, then only tabs whose namespace changed). */
+function syncNamespaces(tabs: Tab[], prev: Tab[] = []) {
+  for (const t of tabs) {
+    if (t.kind !== "cluster") continue;
+    const p = prev.find((x) => x.id === t.id);
+    if (p?.kind === "cluster" && p.context === t.context && p.namespace === t.namespace) continue;
+    if (lastNamespaces()[t.context] !== t.namespace) rememberNamespace(t.context, t.namespace);
+  }
+}
+/** Namespace for a freshly opened cluster view: last used, else the cluster's configured default. */
+export function initialNamespace(context: string): string {
+  return lastNamespaces()[context] ?? useSettings.getState().settings?.clusters[context]?.defaultNamespace ?? "";
+}
+
 export const useTabs = create<TabsState>()(
   persist(
     (set, get) => ({
@@ -105,13 +135,22 @@ export const useTabs = create<TabsState>()(
           return { splitId: other?.id ?? null };
         }),
       open: (tab, opts) => {
+        // The "New Tab" page is hidden from the tab strip, so keep at most one and just focus it.
+        const home = tab.kind === "home" && get().tabs.find((t) => t.kind === "home");
+        if (home) {
+          set({ activeId: home.id });
+          return home.id;
+        }
         const id = newId();
         set((s) => {
           const tabs = [...s.tabs];
-          const anchor = opts?.after ?? s.activeId;
+          // Blank tabs go at the end (like a browser's new tab); others open next to their source.
+          const anchor = tab.kind === "home" ? null : opts?.after ?? s.activeId;
           const idx = anchor ? tabs.findIndex((t) => t.id === anchor) : -1;
           const newTab = { ...tab, id } as Tab;
-          if (idx >= 0) tabs.splice(idx + 1, 0, newTab);
+          // Opening something in the foreground takes over a blank "New Tab" instead of leaving it behind.
+          if (tab.kind !== "home" && !opts?.background && tabs[idx]?.kind === "home") tabs[idx] = newTab;
+          else if (idx >= 0) tabs.splice(idx + 1, 0, newTab);
           else tabs.push(newTab);
           return { tabs, activeId: opts?.background ? s.activeId ?? id : id };
         });
@@ -154,7 +193,8 @@ export const useTabs = create<TabsState>()(
           return { tabs };
         }),
       cycle: (dir) => {
-        const { tabs, activeId } = get();
+        const { activeId } = get();
+        const tabs = get().tabs.filter((t) => t.kind !== "home" || t.id === activeId);
         if (!tabs.length) return;
         const idx = tabs.findIndex((t) => t.id === activeId);
         const next = (idx + dir + tabs.length) % tabs.length;
@@ -165,16 +205,23 @@ export const useTabs = create<TabsState>()(
   ),
 );
 
+syncNamespaces(useTabs.getState().tabs);
+// On startup, land on the restored tabs rather than a leftover (hidden) "New Tab" page.
+{
+  const { tabs, activeId } = useTabs.getState();
+  const restored = tabs.filter((t) => t.kind !== "home");
+  if (restored.length && restored.length !== tabs.length) {
+    useTabs.setState({ tabs: restored, activeId: restored.some((t) => t.id === activeId) ? activeId : restored[0].id });
+  }
+}
+useTabs.subscribe((s, prev) => s.tabs !== prev.tabs && syncNamespaces(s.tabs, prev.tabs));
+
 export function tabTitle(tab: Tab): string {
   switch (tab.kind) {
     case "home":
       return "New Tab";
     case "cluster":
-      if (tab.resource) return pluralLabel(tab.resource);
-      if (tab.page === "releases") return `Helm Releases: ${contextLabel(tab.context)}`;
-      if (tab.page === "charts") return "Helm Charts";
-      if (tab.page?.startsWith("ext:")) return tab.page.split(":").slice(2).join(":") || "Extension";
-      return `Overview: ${contextLabel(tab.context)}`;
+      return contextLabel(tab.context);
     case "detail":
       return `${tab.resource.kind}: ${tab.name}`;
     case "logs":
@@ -199,8 +246,7 @@ export function openCluster(context: string, opts?: { background?: boolean; repl
     const existing = tabs.find((t) => t.kind === "cluster" && t.context === context);
     if (existing) return activate(existing.id);
   }
-  const ns = useSettings.getState().settings?.clusters[context]?.defaultNamespace ?? "";
-  const t = { kind: "cluster" as const, context, resource: null, namespace: ns };
+  const t = { kind: "cluster" as const, context, resource: null, namespace: initialNamespace(context) };
   if (opts?.replace) update(opts.replace, t);
   else open(t, { background: opts?.background });
 }

@@ -217,6 +217,9 @@ button {
   color: var(--text);
   background: var(--bg-1);
 }
+.tab-new.active {
+  color: var(--accent);
+}
 
 .tab-panels {
   flex: 1;
@@ -941,6 +944,14 @@ mark {
   background: #6b5418;
   color: #fff3c9;
   border-radius: 2px;
+}
+.log-line.current {
+  background: var(--bg-3);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.log-line.current mark {
+  background: #d9a52b;
+  color: #1a1300;
 }
 .statusbar {
   display: flex;
@@ -2279,40 +2290,6 @@ button.ns-option {
 
 .no-ns {
   flex: 1;
-  display: flex;
-  justify-content: center;
-  overflow: auto;
-  padding: 48px 24px;
-}
-.no-ns-inner {
-  max-width: 640px;
-  width: 100%;
-}
-.no-ns-inner h3 {
-  margin: 0 0 6px;
-  font-size: 16px;
-}
-.no-ns-actions {
-  display: flex;
-  gap: 8px;
-  margin: 14px 0;
-}
-.no-ns-list {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.chip-btn {
-  border: 1px solid var(--border);
-  background: var(--bg-1);
-  border-radius: 14px;
-  padding: 4px 12px;
-  cursor: pointer;
-  font-size: 12.5px;
-}
-.chip-btn:hover {
-  border-color: var(--accent);
-  background: var(--accent-bg);
 }
 
 /* ------------------------------------------------------------ icon sizing (larger, consistent) */

@@ -72,7 +72,7 @@ export function CommandPaletteHost() {
       }
     }
     for (const t of tabs) {
-      if (t.id === activeId) continue;
+      if (t.id === activeId || t.kind === "home") continue;
       const ctx = tabContext(t);
       cmds.push({ id: `t:${t.id}`, group: "Tabs", label: tabTitle(t), hint: ctx ? contextLabel(ctx) : undefined, run: () => T.activate(t.id) });
     }
