@@ -672,6 +672,7 @@ kbd {
 /* ------------------------------------------------------------ detail */
 
 .drawer {
+  position: relative;
   width: min(560px, 48%);
   flex: none;
   border-left: 1px solid var(--border);
@@ -679,6 +680,23 @@ kbd {
   display: flex;
   flex-direction: column;
   min-height: 0;
+}
+.drawer-resize {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -3px;
+  width: 6px;
+  cursor: col-resize;
+  z-index: 5;
+}
+.drawer-resize:hover {
+  background: var(--accent);
+  opacity: 0.4;
+}
+body.col-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 .detail-tab {
   flex: 1;
@@ -1501,7 +1519,13 @@ mark {
   background: var(--bg-1);
 }
 
+.dsection {
+  overflow-x: auto;
+  min-width: 0;
+}
 .dsection-head {
+  position: sticky;
+  left: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
