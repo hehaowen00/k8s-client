@@ -1,5 +1,5 @@
 import { useSettings, NO_CLUSTERS } from "../settings";
-import { contextColor, contextLabel, openCluster, openSingleton, tabContext, useTabs } from "../store";
+import { contextColor, contextIcon, contextLabel, openCluster, openSingleton, tabContext, useTabs } from "../store";
 import { openContextMenu } from "./ContextMenu";
 
 /** Pinned clusters rail (Lens "hotbar"). Hidden until something is pinned. */
@@ -35,7 +35,7 @@ export function Hotbar() {
               ])
             }
           >
-            {label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase() || "?"}
+            {!contextIcon(ctx) && (label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase() || "?")}
           </button>
         );
       })}

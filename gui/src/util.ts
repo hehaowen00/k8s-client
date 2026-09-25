@@ -149,7 +149,26 @@ export interface Section {
   groups?: { group: string; items: ResourceInfo[] }[];
 }
 
-export function buildSections(resources: ResourceInfo[]): Section[] {
+/** Placeholders (not served by the cluster, or discovery still loading) have an empty version. */
+export const isPlaceholder = (r: ResourceInfo) => !r.version;
+
+const guessPlural = (kind: string) => {
+  const k = kind.toLowerCase();
+  if (k.endsWith("ss")) return k + "es";
+  if (k.endsWith("s")) return k;
+  if (k.endsWith("y")) return k.slice(0, -1) + "ies";
+  return k + "s";
+};
+
+/** Every categorised kind is listed; ones missing from `resources` become placeholders. `q` filters. */
+export function buildSections(served: ResourceInfo[], q = ""): Section[] {
+  const known = new Set(served.map((r) => `${r.group}/${r.kind}`));
+  const placeholders = CATEGORIES.flatMap(([, entries]) => entries)
+    .filter(([g, k]) => !known.has(`${g}/${k}`))
+    .map(([group, kind]): ResourceInfo => ({ group, kind, version: "", plural: guessPlural(kind), namespaced: false, verbs: [] }));
+  const resources = [...served, ...placeholders].filter(
+    (r) => !q || r.kind.toLowerCase().includes(q) || r.plural.includes(q) || r.group.includes(q),
+  );
   const byKey = new Map(resources.map((r) => [`${r.group}/${r.kind}`, r]));
   const used = new Set<string>();
   const sections: Section[] = [];

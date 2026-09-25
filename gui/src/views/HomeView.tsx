@@ -8,7 +8,7 @@ import { confirmDialog, toast } from "../components/Dialogs";
 import { openContextMenu } from "../components/ContextMenu";
 import { addClusterDialog } from "../components/AddClusterDialog";
 import { bumpContexts, useContexts, useSettings, NO_CLUSTERS } from "../settings";
-import { contextColor, contextDetail, contextLabel, openCluster, openSingleton, useTabs, type Tab } from "../store";
+import { contextColor, contextIcon, contextDetail, contextLabel, openCluster, openSingleton, useTabs, type Tab } from "../store";
 
 export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
   const { data, error, loading, reload } = useContexts();
@@ -129,7 +129,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
               }
             >
               <span className="context-avatar" style={{ background: contextColor(c.name) }}>
-                {contextLabel(c.name).slice(0, 2).toUpperCase()}
+                {!contextIcon(c.name) && contextLabel(c.name).slice(0, 2).toUpperCase()}
               </span>
               <span className="context-meta">
                 <span className="context-name">

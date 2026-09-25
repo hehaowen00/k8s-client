@@ -206,13 +206,16 @@ export const useTabs = create<TabsState>()(
 );
 
 syncNamespaces(useTabs.getState().tabs);
-// On startup, land on the restored tabs rather than a leftover (hidden) "New Tab" page.
+// On startup, restore only cluster tabs (category + namespace); logs, shells, details and docks start fresh.
 {
-  const { tabs, activeId } = useTabs.getState();
-  const restored = tabs.filter((t) => t.kind !== "home");
-  if (restored.length && restored.length !== tabs.length) {
-    useTabs.setState({ tabs: restored, activeId: restored.some((t) => t.id === activeId) ? activeId : restored[0].id });
-  }
+  const { tabs, activeId, splitId } = useTabs.getState();
+  const restored = tabs.flatMap((t) => (t.kind === "cluster" ? [{ ...t, dock: undefined }] : []));
+  const has = (id: string | null) => restored.some((t) => t.id === id);
+  useTabs.setState({
+    tabs: restored,
+    activeId: has(activeId) ? activeId : restored[0]?.id ?? null,
+    splitId: has(splitId) && splitId !== activeId ? splitId : null,
+  });
 }
 useTabs.subscribe((s, prev) => s.tabs !== prev.tabs && syncNamespaces(s.tabs, prev.tabs));
 
@@ -289,8 +292,12 @@ export function contextDetail(ctx: string): string | null {
   return m ? `EKS · ${m[1]} · ${m[2]}` : null;
 }
 
-/** Stable per-cluster colour so tabs from different clusters are distinguishable. */
+export const contextIcon = (ctx: string) => useSettings.getState().settings?.clusters[ctx]?.icon || null;
+
+/** Stable per-cluster CSS `background` (icon image, else colour) so clusters are distinguishable. */
 export function contextColor(ctx: string): string {
+  const icon = contextIcon(ctx);
+  if (icon) return `center / cover no-repeat url("${icon}")`;
   const custom = useSettings.getState().settings?.clusters[ctx]?.color;
   if (custom) return custom;
   let h = 0;

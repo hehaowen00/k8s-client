@@ -550,8 +550,12 @@ kbd {
   color: var(--text);
   border-left: 2px solid transparent;
 }
-.nav-item:hover {
+.nav-item:hover:not(:disabled) {
   background: var(--bg-hover);
+}
+.nav-item:disabled {
+  color: var(--text-faint);
+  cursor: default;
 }
 .nav-item.active {
   background: var(--accent-bg);
@@ -1938,6 +1942,33 @@ mark {
   display: flex;
   flex-direction: column;
   gap: 4px;
+}
+/* ponytail: fixed breakpoint, not per-item measuring; tune if the toolbar's contents change. */
+/* Container on the wrapper, not the wrapping toolbar: containment on the flex row itself breaks its height in WebKit. */
+.logs-view {
+  container-type: inline-size;
+}
+.logs-wide,
+.logs-narrow {
+  display: contents;
+}
+@container (width >= 900px) {
+  .logs-narrow {
+    display: none;
+  }
+}
+@container (width < 900px) {
+  .logs-wide {
+    display: none;
+  }
+}
+.ns-popover.logs-more {
+  left: auto;
+  right: 0;
+  width: auto;
+  white-space: nowrap;
+  padding: 8px 10px;
+  gap: 6px;
 }
 .ns-popover .input {
   width: 100%;

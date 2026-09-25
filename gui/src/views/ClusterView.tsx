@@ -4,7 +4,7 @@ import { openDetail } from "../actions";
 import { forgetContext, loadDiscovery, refreshNamespaces, useDiscovery, useNamespaces, usePref } from "../hooks";
 import { useContexts } from "../settings";
 import { contextColor, openSession, openSingleton, pluralLabel, useTabs, type Tab, contextLabel, initialNamespace } from "../store";
-import { ALL_NAMESPACES, buildSections, nsForApi, nsSelection, sameResource } from "../util";
+import { ALL_NAMESPACES, buildSections, isPlaceholder, nsForApi, nsSelection, sameResource } from "../util";
 import { ResourceTable } from "./ResourceTable";
 import { DetailView } from "./DetailView";
 import { OverviewView } from "./OverviewView";
@@ -33,14 +33,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
 
   useEffect(() => setSelected(null), [tab.context, tab.resource?.kind, tab.resource?.group, tab.namespace]);
 
-  const sections = useMemo(() => {
-    const all = discovery.data ?? [];
-    const q = kindFilter.toLowerCase();
-    const filtered = q
-      ? all.filter((r) => r.kind.toLowerCase().includes(q) || r.plural.includes(q) || r.group.includes(q))
-      : all;
-    return buildSections(filtered);
-  }, [discovery.data, kindFilter]);
+  const sections = useMemo(() => buildSections(discovery.data ?? [], kindFilter.toLowerCase()), [discovery.data, kindFilter]);
 
   const pick = (r: ResourceInfo, e: React.MouseEvent) => {
     if (e.ctrlKey || e.metaKey || e.button === 1) {
@@ -60,7 +53,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
   // Object counts for the expanded sidebar sections (cheap limit=1 lists), refreshed every 30s.
   const [kindCounts, setKindCounts] = useState<Record<string, number>>({});
   const expanded = useMemo(
-    () => sections.filter((s) => !(!kindFilter && collapsed[s.title])).flatMap((s) => s.items),
+    () => sections.filter((s) => !(!kindFilter && collapsed[s.title])).flatMap((s) => s.items.filter((r) => !isPlaceholder(r))),
     [sections, collapsed, kindFilter],
   );
   const countNs = nsForApi(tab.namespace) ?? "";
@@ -100,7 +93,8 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
     <button
       key={`${r.group}/${r.kind}`}
       className={`nav-item ${sameResource(r, tab.resource) ? "active" : ""}`}
-      title={`${r.plural}${r.group ? `.${r.group}` : ""} (${r.version})`}
+      disabled={isPlaceholder(r)}
+      title={isPlaceholder(r) ? (discovery.loading ? "Discovering APIs…" : "Not served by this cluster") : `${r.plural}${r.group ? `.${r.group}` : ""} (${r.version})`}
       onClick={(e) => pick(r, e)}
       onAuxClick={(e) => e.button === 1 && pick(r, e)}
     >

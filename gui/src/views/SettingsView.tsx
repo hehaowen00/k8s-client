@@ -27,6 +27,19 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 /** Text input that commits on blur / Enter instead of every keystroke. */
+/** Downscale an image file to a 64px square (cover-cropped) PNG data URL, so settings stay small. */
+async function iconDataUrl(file: File): Promise<string> {
+  const img = await createImageBitmap(file);
+  const size = 64;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const scale = Math.max(size / img.width, size / img.height);
+  const w = img.width * scale;
+  const h = img.height * scale;
+  canvas.getContext("2d")!.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+  return canvas.toDataURL("image/png");
+}
+
 function CommitInput({ value, onCommit, placeholder, className }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
@@ -161,6 +174,33 @@ export function SettingsView({ tab }: { tab: Extract<Tab, { kind: "settings" }> 
                     Auto
                   </button>
                   <span className="swatch preview" style={{ background: contextColor(cluster) }} title="Current" />
+                </div>
+              </Field>
+              <Field label="Icon" hint="Image shown instead of the colour">
+                <div className="swatches">
+                  <label className="btn btn-xs">
+                    Choose image…
+                    <input
+                      type="file"
+                      accept="image/*"
+                      hidden
+                      onChange={async (e) => {
+                        const file = e.target.files?.[0];
+                        e.target.value = "";
+                        if (!file) return;
+                        try {
+                          setCluster_({ icon: await iconDataUrl(file) });
+                        } catch {
+                          toast("Couldn't read that image", "bad");
+                        }
+                      }}
+                    />
+                  </label>
+                  {cs.icon && (
+                    <button className="btn btn-xs btn-ghost" onClick={() => setCluster_({ icon: null })}>
+                      Remove
+                    </button>
+                  )}
                 </div>
               </Field>
               <Field label="Pin to hotbar">

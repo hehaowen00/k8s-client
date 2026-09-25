@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, POD_RESOURCE, type LogSource } from "../api";
 import { useAsync, usePref } from "../hooks";
-import { useTabs, type Tab, contextLabel } from "../store";
+import { useTabs, type Tab } from "../store";
 import { hasAnsi, parseAnsi, stripAnsi } from "../ansi";
 import { Select } from "../components/Select";
 import { Checkbox } from "../components/Checkbox";
@@ -78,6 +78,14 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   const [showPod, setShowPod] = usePref("logs.showPod", false);
   const [previous, setPrevious] = useState(false);
   const [follow, setFollow] = useState(true);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!moreOpen) return;
+    const close = (e: MouseEvent) => !moreRef.current?.contains(e.target as Node) && setMoreOpen(false);
+    window.addEventListener("mousedown", close);
+    return () => window.removeEventListener("mousedown", close);
+  }, [moreOpen]);
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState(false);
   const [regex, setRegex] = usePref("logs.regex", false);
@@ -300,15 +308,32 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   };
   const streaming = sources.filter((s) => s.state === "streaming").length;
 
+  // Shown inline when the toolbar is wide, inside the ⋯ menu when narrow (CSS container query).
+  const toggles = (
+    <>
+      {!multi && (
+        <Checkbox checked={previous} onChange={(e) => setPrevious(e.target.checked)}>Previous</Checkbox>
+      )}
+      <Checkbox checked={wrap} onChange={(e) => setWrap(e.target.checked)}>Wrap</Checkbox>
+      <Checkbox checked={follow} onChange={(e) => setFollow(e.target.checked)}>Follow</Checkbox>
+    </>
+  );
+  const actions: [string, () => void, boolean?][] = [
+    ["Reconnect", () => setNonce((n) => n + 1)],
+    ["Save", download],
+    [
+      "Clear",
+      () => {
+        linesRef.current = [];
+        setVersion((v) => v + 1);
+      },
+      true,
+    ],
+  ];
+
   return (
     <div className="logs-view">
       <div className="toolbar">
-        <h2 className="toolbar-title">
-          {title}
-          <span className="muted small">
-            {tab.namespace} · {contextLabel(tab.context)}
-          </span>
-        </h2>
         {workload && podNames.length > 1 && (
           <Select className="select" value={podFilter} onChange={(e) => setPodFilter(e.target.value)} title="Pod">
             <option value="">All pods ({podNames.length})</option>
@@ -384,33 +409,46 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
             </>
           )
         )}
-        <Checkbox checked={regex} onChange={(e) => setRegex(e.target.checked)}>Regex</Checkbox>
-        <Checkbox checked={filterMode} onChange={(e) => setFilterMode(e.target.checked)}>Only matches</Checkbox>
-        <Checkbox checked={timestamps} onChange={(e) => setTimestamps(e.target.checked)}>Timestamps</Checkbox>
-        {!multi && (
-          <Checkbox checked={previous} onChange={(e) => setPrevious(e.target.checked)}>Previous</Checkbox>
-        )}
-        {workload && (
-          <Checkbox checked={showPod} onChange={(e) => setShowPod(e.target.checked)}>Pod name</Checkbox>
-        )}
-        <Checkbox checked={wrap} onChange={(e) => setWrap(e.target.checked)}>Wrap</Checkbox>
-        <Checkbox checked={follow} onChange={(e) => setFollow(e.target.checked)}>Follow</Checkbox>
+        <span className="logs-wide">{toggles}</span>
         <div className="spacer" />
-        <button className="btn btn-sm" onClick={() => setNonce((n) => n + 1)}>
-          Reconnect
-        </button>
-        <button className="btn btn-sm" onClick={download}>
-          Save
-        </button>
-        <button
-          className="btn btn-sm btn-ghost"
-          onClick={() => {
-            linesRef.current = [];
-            setVersion((v) => v + 1);
-          }}
-        >
-          Clear
-        </button>
+        <span className="logs-wide">
+          {actions.map(([label, onClick, ghost]) => (
+            <button key={label} className={`btn btn-sm ${ghost ? "btn-ghost" : ""}`} onClick={onClick}>
+              {label}
+            </button>
+          ))}
+        </span>
+        <div className="ns-picker" ref={moreRef}>
+          <button className="btn btn-sm btn-icon" title="More options" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>
+            ⋯
+          </button>
+          {moreOpen && (
+            <div className="ns-popover logs-more" onKeyDown={(e) => e.key === "Escape" && setMoreOpen(false)}>
+              <Checkbox checked={regex} onChange={(e) => setRegex(e.target.checked)}>Regex</Checkbox>
+              <Checkbox checked={filterMode} onChange={(e) => setFilterMode(e.target.checked)}>Only matches</Checkbox>
+              <Checkbox checked={timestamps} onChange={(e) => setTimestamps(e.target.checked)}>Timestamps</Checkbox>
+              {workload && (
+                <Checkbox checked={showPod} onChange={(e) => setShowPod(e.target.checked)}>Pod name</Checkbox>
+              )}
+              <span className="logs-narrow">
+                {toggles}
+                <div className="menu-sep" />
+                {actions.map(([label, onClick]) => (
+                  <button
+                    key={label}
+                    className="menu-item"
+                    onClick={() => {
+                      onClick();
+                      setMoreOpen(false);
+                    }}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
       <div className="logs-scroll">
       <div

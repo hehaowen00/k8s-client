@@ -4,7 +4,7 @@ use std::sync::{Arc, Mutex};
 
 use kube::config::KubeConfigOptions;
 use kube::{Client, Config};
-use tokio::sync::{mpsc, Mutex as AsyncMutex};
+use tokio::sync::{mpsc, Mutex as AsyncMutex, OnceCell};
 use tokio_util::sync::CancellationToken;
 
 use crate::kube_ops::ResourceInfo;
@@ -18,7 +18,7 @@ pub enum SessionInput {
 
 #[derive(Default)]
 pub struct AppState {
-    clients: AsyncMutex<HashMap<String, Client>>,
+    clients: AsyncMutex<HashMap<String, Arc<OnceCell<Client>>>>,
     discovery: AsyncMutex<HashMap<String, Arc<Vec<ResourceInfo>>>>,
     streams: Mutex<HashMap<String, CancellationToken>>,
     sessions: Mutex<HashMap<String, mpsc::UnboundedSender<SessionInput>>>,
@@ -89,10 +89,14 @@ impl AppState {
         (entries, infos, default_error)
     }
 
+    /// One client per context. Concurrent first calls share a single build (one exec-auth run, e.g. `aws eks get-token`).
     pub async fn client(&self, context: &str) -> Result<Client> {
-        if let Some(c) = self.clients.lock().await.get(context) {
-            return Ok(c.clone());
-        }
+        let cell = self.clients.lock().await.entry(context.to_string()).or_default().clone();
+        // Errors aren't cached: the next call retries.
+        cell.get_or_try_init(|| self.build_client(context)).await.cloned()
+    }
+
+    async fn build_client(&self, context: &str) -> Result<Client> {
         let mut entry = self.registry.lock().await.get(context).cloned();
         if entry.is_none() {
             self.rescan().await;
@@ -111,12 +115,11 @@ impl AppState {
         if let Some(p) = proxy {
             config.proxy_url = Some(p.trim().parse().map_err(|e| format!("invalid proxy URL {p}: {e}"))?);
         }
-        let client = Client::try_from(config).map_err(err)?;
-        self.clients
-            .lock()
+        // Client::try_from runs exec auth plugins synchronously; keep them off the async workers.
+        tokio::task::spawn_blocking(move || Client::try_from(config))
             .await
-            .insert(context.to_string(), client.clone());
-        Ok(client)
+            .map_err(err)?
+            .map_err(err)
     }
 
     /// Write a kubeconfig whose current-context is `context` (for local terminals) and return its path.
