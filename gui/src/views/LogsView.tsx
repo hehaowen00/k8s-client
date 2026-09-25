@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, POD_RESOURCE, type LogSource } from "../api";
 import { useAsync, usePref } from "../hooks";
 import { useTabs, type Tab } from "../store";
@@ -86,6 +86,32 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     window.addEventListener("mousedown", close);
     return () => window.removeEventListener("mousedown", close);
   }, [moreOpen]);
+  // Toggles/actions sit inline while they fit on one row, else move into the ⋯ menu.
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const needW = useRef(0);
+  const [narrow, setNarrow] = useState(false);
+  const fitToolbar = () => {
+    const bar = toolbarRef.current;
+    if (!bar) return;
+    // Inline items only have a width while shown; when hidden, reuse the last measurement.
+    if ((bar.querySelector(".logs-wide > *") as HTMLElement | null)?.offsetWidth) {
+      const cs = getComputedStyle(bar);
+      const items = [...bar.querySelectorAll<HTMLElement>(":scope > :not(.spacer, .logs-wide), :scope > .logs-wide > *")];
+      needW.current =
+        items.reduce((w, el) => w + el.offsetWidth, 0) +
+        parseFloat(cs.columnGap) * (items.length - 1) +
+        parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+    }
+    setNarrow(bar.clientWidth < needW.current);
+  };
+  const fitRef = useRef(fitToolbar);
+  fitRef.current = fitToolbar;
+  useLayoutEffect(fitToolbar); // toolbar contents change with state (selects, match counter)
+  useEffect(() => {
+    const ro = new ResizeObserver(() => fitRef.current());
+    ro.observe(toolbarRef.current!);
+    return () => ro.disconnect();
+  }, []);
   const [search, setSearch] = useState("");
   const [filterMode, setFilterMode] = useState(false);
   const [regex, setRegex] = usePref("logs.regex", false);
@@ -308,7 +334,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   };
   const streaming = sources.filter((s) => s.state === "streaming").length;
 
-  // Shown inline when the toolbar is wide, inside the ⋯ menu when narrow (CSS container query).
+  // Shown inline when the toolbar is wide, inside the ⋯ menu when narrow.
   const toggles = (
     <>
       {!multi && (
@@ -332,8 +358,8 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   ];
 
   return (
-    <div className="logs-view">
-      <div className="toolbar">
+    <div className={`logs-view ${narrow ? "narrow" : ""}`}>
+      <div className="toolbar" ref={toolbarRef}>
         {workload && podNames.length > 1 && (
           <Select className="select" value={podFilter} onChange={(e) => setPodFilter(e.target.value)} title="Pod">
             <option value="">All pods ({podNames.length})</option>
@@ -409,15 +435,6 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
             </>
           )
         )}
-        <span className="logs-wide">{toggles}</span>
-        <div className="spacer" />
-        <span className="logs-wide">
-          {actions.map(([label, onClick, ghost]) => (
-            <button key={label} className={`btn btn-sm ${ghost ? "btn-ghost" : ""}`} onClick={onClick}>
-              {label}
-            </button>
-          ))}
-        </span>
         <div className="ns-picker" ref={moreRef}>
           <button className="btn btn-sm btn-icon" title="More options" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>
             ⋯
@@ -449,6 +466,15 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
             </div>
           )}
         </div>
+        <span className="logs-wide">{toggles}</span>
+        <div className="spacer" />
+        <span className="logs-wide">
+          {actions.map(([label, onClick, ghost]) => (
+            <button key={label} className={`btn btn-sm ${ghost ? "btn-ghost" : ""}`} onClick={onClick}>
+              {label}
+            </button>
+          ))}
+        </span>
       </div>
       <div className="logs-scroll">
       <div

@@ -1,4 +1,6 @@
+import { useState } from "react";
 import { useSettings, NO_CLUSTERS } from "../settings";
+import { usePref } from "../hooks";
 import { contextColor, contextIcon, contextLabel, openCluster, openSingleton, tabContext, useTabs } from "../store";
 import { openContextMenu } from "./ContextMenu";
 
@@ -10,10 +12,25 @@ export function Hotbar() {
     const t = s.tabs.find((x) => x.id === s.activeId);
     return t ? tabContext(t) : null;
   });
+  const [order, setOrder] = usePref<string[]>("hotbar.order", []);
+  const [dragCtx, setDragCtx] = useState<string | null>(null);
+  const [overCtx, setOverCtx] = useState<string | null>(null);
+  // Newly pinned clusters (not in the saved order yet) go last.
+  const rank = (ctx: string) => (order.includes(ctx) ? order.indexOf(ctx) : Infinity);
   const pinned = Object.entries(clusters)
     .filter(([, c]) => c.pinned)
-    .map(([ctx]) => ctx);
+    .map(([ctx]) => ctx)
+    .sort((a, b) => rank(a) - rank(b));
   if (!pinned.length) return null;
+  const drop = (target: string) => {
+    if (dragCtx && dragCtx !== target) {
+      const next = pinned.filter((c) => c !== dragCtx);
+      next.splice(pinned.indexOf(target), 0, dragCtx);
+      setOrder(next);
+    }
+    setDragCtx(null);
+    setOverCtx(null);
+  };
   return (
     <nav className="hotbar" aria-label="Pinned clusters">
       {pinned.map((ctx) => {
@@ -21,9 +38,27 @@ export function Hotbar() {
         return (
           <button
             key={ctx}
-            className={`hotbar-item ${activeContext === ctx ? "active" : ""}`}
+            className={`hotbar-item ${activeContext === ctx ? "active" : ""} ${overCtx === ctx && dragCtx !== ctx ? "drop-target" : ""}`}
             style={{ background: contextColor(ctx) }}
             title={label}
+            draggable
+            onDragStart={(e) => {
+              setDragCtx(ctx);
+              e.dataTransfer.effectAllowed = "move";
+            }}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setOverCtx(ctx);
+            }}
+            onDragLeave={() => setOverCtx(null)}
+            onDrop={(e) => {
+              e.preventDefault();
+              drop(ctx);
+            }}
+            onDragEnd={() => {
+              setDragCtx(null);
+              setOverCtx(null);
+            }}
             onClick={(e) => openCluster(ctx, { focusExisting: !(e.ctrlKey || e.metaKey), background: e.ctrlKey || e.metaKey })}
             onAuxClick={(e) => e.button === 1 && openCluster(ctx, { background: true })}
             onContextMenu={(e) =>
