@@ -125,6 +125,10 @@ button {
   border-bottom: 1px solid var(--border);
   flex: none;
 }
+/* macOS: overlay titlebar, tab bar doubles as the drag region; room for traffic lights. */
+:root[data-platform="mac"] .tabbar {
+  padding-left: 90px;
+}
 .tabstrip {
   display: flex;
   overflow-x: auto;
@@ -1778,6 +1782,9 @@ mark {
   outline: 2px solid var(--text);
   outline-offset: 2px;
 }
+.hotbar-item.drop-target {
+  box-shadow: 0 0 0 2px var(--accent);
+}
 .hotbar-tool {
   border: 0;
   background: none;
@@ -1943,28 +1950,15 @@ mark {
   flex-direction: column;
   gap: 4px;
 }
-/* ponytail: fixed breakpoint, not per-item measuring; tune if the toolbar's contents change. */
-/* Container on the wrapper, not the wrapping toolbar: containment on the flex row itself breaks its height in WebKit. */
-.logs-view {
-  container-type: inline-size;
-}
 .logs-wide,
 .logs-narrow {
   display: contents;
 }
-@container (width >= 900px) {
-  .logs-narrow {
-    display: none;
-  }
-}
-@container (width < 900px) {
-  .logs-wide {
-    display: none;
-  }
+.logs-view.narrow .logs-wide,
+.logs-view:not(.narrow) .logs-narrow {
+  display: none;
 }
 .ns-popover.logs-more {
-  left: auto;
-  right: 0;
   width: auto;
   white-space: nowrap;
   padding: 8px 10px;

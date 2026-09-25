@@ -26,7 +26,7 @@ export function TabBar() {
   };
 
   return (
-    <div className="tabbar">
+    <div className="tabbar" data-tauri-drag-region>
       <div
         className="tabstrip"
         ref={stripRef}

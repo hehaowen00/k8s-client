@@ -13,6 +13,9 @@
 #            (per-user, no root; `sudo make install PREFIX=/usr/local` for system-wide)
 #   Windows  runs the NSIS installer silently (per-user, %LOCALAPPDATA%\Kube Portal, Start menu entry)
 #
+# macOS builds are code signed with SIGN_ID (default "-" = ad-hoc); pass a Developer ID to sign for
+# distribution, e.g. `make package SIGN_ID="Developer ID Application: Name (TEAMID)"`.
+#
 # PLATFORM is detected (macos | linux | windows) and can be overridden, e.g. `make -n install PLATFORM=macos`.
 
 APP      := Kube Portal
@@ -38,6 +41,8 @@ PLATFORM ?= $(DETECTED)
 
 # macOS
 APP_DIR ?= /Applications
+SIGN_ID ?= -
+export APPLE_SIGNING_IDENTITY := $(SIGN_ID)
 
 # Linux (XDG layout)
 PREFIX      ?= $(HOME)/.local
@@ -66,6 +71,14 @@ build: deps
 
 package: deps
 	cd $(GUI) && $(PNPM) tauri build
+ifeq ($(PLATFORM),macos)
+	@for dmg in "$(BUNDLE)"/dmg/*.dmg; do \
+	  mnt=$$(hdiutil attach -nobrowse -readonly "$$dmg" | tail -1 | cut -f3) && \
+	  codesign --verify --deep --strict "$$mnt/$(APP).app"; rc=$$?; hdiutil detach -quiet "$$mnt"; \
+	  [ $$rc -eq 0 ] || { echo "error: $$dmg: app signature invalid"; exit 1; }; \
+	  echo "Signature OK: $$dmg"; \
+	done
+endif
 
 test: deps
 	cd $(GUI) && npx tsc --noEmit
@@ -83,6 +96,7 @@ uninstall: uninstall-$(PLATFORM)
 install-macos: deps
 	cd $(GUI) && $(PNPM) tauri build --bundles app
 	@test -d "$(BUNDLE)/macos/$(APP).app" || { echo "error: $(BUNDLE)/macos/$(APP).app was not built"; exit 1; }
+	codesign --verify --deep --strict "$(BUNDLE)/macos/$(APP).app"
 	@if pgrep -xq "$(BIN)"; then echo "Quitting running $(APP)…"; osascript -e 'quit app "$(APP)"' || true; sleep 1; fi
 	rm -rf "$(APP_DIR)/$(APP).app"
 	cp -R "$(BUNDLE)/macos/$(APP).app" "$(APP_DIR)/"
