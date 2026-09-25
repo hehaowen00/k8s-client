@@ -87,7 +87,7 @@ cd src-tauri && cargo test --lib
 
 ### Where things are stored
 
-- Settings: `settings.json` in the app config dir (`~/.config/dev.k8side.app/` on Linux).
+- Settings: `~/.config/kube-portal/settings.db`.
 - Pasted kubeconfigs: `kubeconfigs/` in the same dir (owner-only permissions).
 - Extensions: `extensions/` in the same dir.
 - Downloaded kubectl binaries: `bin/` in the app data dir.

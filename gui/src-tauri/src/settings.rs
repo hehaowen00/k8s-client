@@ -20,6 +20,8 @@ pub struct ClusterSettings {
     pub display_name: Option<String>,
     /// CSS colour for the cluster's dot / avatar.
     pub color: Option<String>,
+    /// Image data URL (downscaled) shown instead of the colour.
+    pub icon: Option<String>,
     pub default_namespace: Option<String>,
     /// For users who can't list namespaces: shown instead of listing, and "all namespaces" spans these.
     pub accessible_namespaces: Vec<String>,

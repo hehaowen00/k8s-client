@@ -8,6 +8,8 @@ import { useAsync } from "./hooks";
 export interface ClusterSettings {
   displayName?: string | null;
   color?: string | null;
+  /** Image data URL shown instead of the colour. */
+  icon?: string | null;
   defaultNamespace?: string | null;
   accessibleNamespaces: string[];
   proxyUrl?: string | null;
