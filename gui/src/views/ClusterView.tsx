@@ -161,7 +161,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
           </div>
           <input
             className="input sidebar-search"
-            placeholder="Find resource type…"
+            placeholder="Find resource type"
             value={kindFilter}
             onChange={(e) => setKindFilter(e.target.value)}
           />
@@ -276,7 +276,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
                 )}
                 <input
                   className="input filter"
-                  placeholder="Filter (name, label=value, status…)"
+                  placeholder="Filter (name, label=value, status)"
                   value={filter}
                   onChange={(e) => setFilter(e.target.value)}
                 />

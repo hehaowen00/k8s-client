@@ -103,7 +103,7 @@ export function HelmReleases({ context, namespace, active, onNamespace }: { cont
           Releases <span className="muted small">{list ? shown.length : ""}</span>
         </h2>
         <NamespacePicker value={namespace} options={namespaces.data ?? []} onChange={onNamespace} />
-        <input className="input filter" placeholder="Filter releases…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <input className="input filter" placeholder="Filter releases" value={filter} onChange={(e) => setFilter(e.target.value)} />
         <div className="spacer" />
         <button className="btn btn-sm btn-ghost btn-icon" onClick={reload} title="Refresh">
           ⟳
@@ -531,7 +531,7 @@ export function HelmCharts({ context, active }: { context: string; active: boole
             </option>
           ))}
         </Select>
-        <input className="input filter" placeholder="Search charts…" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input className="input filter" placeholder="Search charts" value={query} onChange={(e) => setQuery(e.target.value)} />
         <div className="spacer" />
         <button
           className="btn btn-sm"

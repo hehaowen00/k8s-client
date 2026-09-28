@@ -20,7 +20,7 @@ export function PortForwardsView({ active }: { active: boolean }) {
         <h2 className="toolbar-title">
           Port Forwards <span className="muted small">{list.length}</span>
         </h2>
-        <span className="muted small">Start one from a pod or service (right-click → Port Forward…)</span>
+        <span className="muted small">Start one from a pod or service (right-click → Port Forward)</span>
         <div className="spacer" />
         {list.length > 0 && (
           <button

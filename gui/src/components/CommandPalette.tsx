@@ -133,7 +133,7 @@ export function CommandPaletteHost() {
         <input
           className="input palette-input"
           autoFocus
-          placeholder="Type a command, cluster, tab or resource…"
+          placeholder="Type a command, cluster, tab or resource"
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {

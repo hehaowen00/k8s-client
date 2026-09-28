@@ -82,7 +82,7 @@ export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
             setDraft(t);
           }}
         >
-          <option value="">Template…</option>
+          <option value="">Template</option>
           {Object.keys(TEMPLATES).map((k) => (
             <option key={k} value={k}>
               {k}

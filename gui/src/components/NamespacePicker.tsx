@@ -26,7 +26,7 @@ export function NamespacePicker({
     return () => window.removeEventListener("mousedown", close);
   }, [open]);
 
-  const label = sel.all ? "All namespaces" : selected.length === 0 ? "Select namespace…" : selected.length === 1 ? selected[0] : `${selected.length} namespaces`;
+  const label = sel.all ? "All namespaces" : selected.length === 0 ? "Select namespace" : selected.length === 1 ? selected[0] : `${selected.length} namespaces`;
   const toggle = (ns: string) => {
     const next = selected.includes(ns) ? selected.filter((x) => x !== ns) : [...selected, ns];
     onChange(next.join(","));
@@ -54,7 +54,7 @@ export function NamespacePicker({
       </button>
       {open && (
         <div className="ns-popover" onKeyDown={(e) => e.key === "Escape" && setOpen(false)}>
-          <input className="input" autoFocus placeholder="Filter namespaces…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <input className="input" autoFocus placeholder="Filter namespaces" value={q} onChange={(e) => setQ(e.target.value)} />
           <button className={`ns-option ${sel.all ? "active" : ""}`} onClick={() => onChange(sel.all ? "" : ALL_NAMESPACES)}>
             <span className="ns-check">{sel.all ? "✓" : ""}</span>
             All namespaces

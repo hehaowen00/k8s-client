@@ -408,7 +408,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
         </Select>
         <input
           className="input filter"
-          placeholder="Search…"
+          placeholder="Search"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => {
