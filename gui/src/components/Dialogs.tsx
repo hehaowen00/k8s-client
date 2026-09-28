@@ -20,6 +20,12 @@ type Dialog =
       inputType?: string;
       max?: number;
       resolve: (v: string | null) => void;
+    }
+  | {
+      type: "error";
+      title: string;
+      message: string;
+      resolve: () => void;
     };
 
 interface Toast {
@@ -28,10 +34,13 @@ interface Toast {
   tone: "ok" | "bad";
 }
 
-const useDialogs = create<{ dialog: Dialog | null; toasts: Toast[] }>(() => ({
-  dialog: null,
+// Dialogs queue: an error raised while another dialog is open waits instead of replacing it
+// (which would also leave that dialog's promise unresolved).
+const useDialogs = create<{ queue: Dialog[]; toasts: Toast[] }>(() => ({
+  queue: [],
   toasts: [],
 }));
+const show = (d: Dialog) => useDialogs.setState((s) => ({ queue: [...s.queue, d] }));
 
 export function confirmDialog(opts: {
   title: string;
@@ -39,9 +48,7 @@ export function confirmDialog(opts: {
   danger?: boolean;
   confirmLabel?: string;
 }): Promise<boolean> {
-  return new Promise((resolve) =>
-    useDialogs.setState({ dialog: { type: "confirm", ...opts, resolve } }),
-  );
+  return new Promise((resolve) => show({ type: "confirm", ...opts, resolve }));
 }
 
 export function promptDialog(opts: {
@@ -52,31 +59,39 @@ export function promptDialog(opts: {
   /** Upper bound for inputType "range". */
   max?: number;
 }): Promise<string | null> {
-  return new Promise((resolve) =>
-    useDialogs.setState({
-      dialog: { type: "prompt", initial: "", ...opts, resolve },
-    }),
-  );
+  return new Promise((resolve) => show({ type: "prompt", initial: "", ...opts, resolve }));
 }
 
 export function alertDialog(title: string, message: string): Promise<void> {
-  return new Promise((resolve) =>
-    useDialogs.setState({ dialog: { type: "confirm", title, message, alert: true, confirmLabel: "OK", resolve: () => resolve() } }),
-  );
+  return new Promise((resolve) => show({ type: "confirm", title, message, alert: true, confirmLabel: "OK", resolve: () => resolve() }));
+}
+
+/** The full text of an error, in a dialog it can be read and copied from. */
+export function errorDialog(message: string, title = "Error"): Promise<void> {
+  // The same failure repeated (e.g. a button clicked twice) shows once.
+  const queued = useDialogs.getState().queue.find((d) => d.type === "error" && d.message === message);
+  if (queued) return Promise.resolve();
+  return new Promise((resolve) => show({ type: "error", title, message, resolve }));
 }
 
 let toastId = 0;
+/** A passing notice; failures ("bad") open an error dialog with the whole message instead. */
 export function toast(message: string, tone: "ok" | "bad" = "ok") {
+  if (tone === "bad") {
+    void errorDialog(message);
+    return;
+  }
   const id = ++toastId;
   useDialogs.setState((s) => ({ toasts: [...s.toasts, { id, message, tone }] }));
   setTimeout(
     () => useDialogs.setState((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
-    tone === "bad" ? 8000 : 3500,
+    3500,
   );
 }
 
 export function DialogHost() {
-  const { dialog, toasts } = useDialogs();
+  const { queue, toasts } = useDialogs();
+  const dialog = queue[0] ?? null;
   const [value, setValue] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
   const okRef = useRef<HTMLButtonElement>(null);
@@ -93,8 +108,9 @@ export function DialogHost() {
   const finish = (ok: boolean) => {
     if (!dialog) return;
     if (dialog.type === "confirm") dialog.resolve(ok);
+    else if (dialog.type === "error") dialog.resolve();
     else dialog.resolve(ok ? value : null);
-    useDialogs.setState({ dialog: null });
+    useDialogs.setState((s) => ({ queue: s.queue.slice(1) }));
   };
 
   return (
@@ -102,7 +118,7 @@ export function DialogHost() {
       {dialog && (
         <div className="modal-backdrop" onMouseDown={() => finish(false)}>
           <form
-            className="modal"
+            className={`modal ${dialog.type === "error" ? "modal-wide" : ""}`}
             onMouseDown={(e) => e.stopPropagation()}
             onSubmit={(e) => {
               e.preventDefault();
@@ -111,7 +127,7 @@ export function DialogHost() {
             onKeyDown={(e) => e.key === "Escape" && finish(false)}
           >
             <h3>{dialog.title}</h3>
-            <p>{dialog.message}</p>
+            {dialog.type === "error" ? <pre className="modal-error">{dialog.message}</pre> : <p>{dialog.message}</p>}
             {dialog.type === "prompt" && dialog.inputType === "range" ? (
               <div className="modal-slider">
                 <input
@@ -143,7 +159,16 @@ export function DialogHost() {
               />
             )}
             <div className="modal-actions">
-              {!(dialog.type === "confirm" && dialog.alert) && (
+              {dialog.type === "error" && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => navigator.clipboard.writeText(dialog.message).then(() => toast("Copied"))}
+                >
+                  Copy
+                </button>
+              )}
+              {dialog.type !== "error" && !(dialog.type === "confirm" && dialog.alert) && (
                 <button type="button" className="btn" onClick={() => finish(false)}>
                   Cancel
                 </button>
