@@ -244,9 +244,9 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
     <div className="terminal-view">
       <div className="toolbar">
         <h2 className="toolbar-title">
-          {tab.kind === "exec" ? (tab.nodeShell ? `Node shell: ${tab.nodeShell}` : tab.pod) : "Local Terminal"}
+          {tab.kind === "exec" ? (tab.nodeShell ? `Node shell: ${tab.nodeShell}` : tab.pod) : "Terminal"}
           {tab.kind === "exec" && tab.attach && <span className="badge">attached</span>}
-          {tab.kind === "terminal" && tab.context && (
+          {tab.kind === "terminal" && (
             <span className="muted small">kubectl → {contextLabel(tab.context)}</span>
           )}
           {tab.kind === "exec" && (

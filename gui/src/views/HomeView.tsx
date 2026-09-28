@@ -190,13 +190,6 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
           <span>Tools</span>
         </div>
         <div className="context-grid">
-          <button className="context-card" onClick={() => update(tab.id, { kind: "terminal" })}>
-            <span className="context-avatar tool">$</span>
-            <span className="context-meta">
-              <span className="context-name">Local Terminal</span>
-              <span className="muted small">Shell on this machine (Ctrl+`)</span>
-            </span>
-          </button>
           <button className="context-card" onClick={() => openSingleton("settings")}>
             <span className="context-avatar tool">⚙</span>
             <span className="context-meta">

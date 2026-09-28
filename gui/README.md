@@ -32,8 +32,8 @@ Feature parity with Lens is tracked item by item in [`../ROADMAP.md`](../ROADMAP
   Actions you're not allowed to perform are disabled (SelfSubjectAccessReview).
 - **Logs**: single container, all containers, or a whole workload (following rollouts); tail, since,
   timestamps, previous, wrap, ANSI colours, search / filter, pod filter, save.
-- **Terminals**: pod shells and attach (xterm.js), local terminals, and cluster terminals with `kubectl`
-  pointed at that cluster, using a kubectl downloaded to match the cluster version.
+- **Terminals**: pod shells and attach (xterm.js), and cluster terminals: a local shell with
+  `KUBECONFIG` scoped to that cluster (and its proxy), using a kubectl downloaded to match the cluster version.
 - **Metrics**: live usage from metrics-server; history from Prometheus when present (auto-detected and
   queried through the API server's service proxy), otherwise sampled while Kube Portal is open.
 - **Helm**: releases (details, values, manifest, history, upgrade, rollback, uninstall), chart browser with
@@ -52,7 +52,6 @@ Feature parity with Lens is tracked item by item in [`../ROADMAP.md`](../ROADMAP
 | Ctrl+Shift+P, Ctrl+K | Command palette |
 | Ctrl+\\ | Toggle split view |
 | Ctrl+J | Minimise / restore the dock |
-| Ctrl+` | Local terminal |
 | Ctrl+, | Settings |
 | Ctrl/middle-click | Open a cluster, resource type or object in a background tab |
 | Double-click / Enter | Open an object in a new tab |

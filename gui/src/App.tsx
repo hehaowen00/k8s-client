@@ -15,7 +15,7 @@ import { AddClusterDialogHost } from "./components/AddClusterDialog";
 import { Hotbar } from "./components/Hotbar";
 import { SettingsView } from "./views/SettingsView";
 import { useResolvedTheme, useSettings, useSettingsBootstrap } from "./settings";
-import { dock, isDockHost, openSession, openSingleton } from "./store";
+import { dock, isDockHost, openSingleton } from "./store";
 import { CommandPaletteHost, openPalette } from "./components/CommandPalette";
 import { usePref } from "./hooks";
 import { loadExtensions } from "./extensions";
@@ -105,9 +105,6 @@ export default function App() {
       } else if (e.key === ",") {
         e.preventDefault();
         openSingleton("settings");
-      } else if (e.key === "`" ) {
-        e.preventDefault();
-        openSession({ kind: "terminal" });
       }
     };
     window.addEventListener("keydown", onKey, true);

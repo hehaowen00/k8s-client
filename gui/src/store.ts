@@ -50,7 +50,7 @@ export type Tab = TabBase &
         /** Node shell: a privileged pod is created on this node on connect and deleted afterwards. */
         nodeShell?: string;
       }
-    | { kind: "terminal"; context?: string | null }
+    | { kind: "terminal"; context: string }
     | { kind: "apply"; context: string | null; namespace: string | null }
     | { kind: "portforwards" }
     | { kind: "settings"; context?: string | null }
@@ -232,7 +232,7 @@ export function tabTitle(tab: Tab): string {
     case "exec":
       return tab.nodeShell ? `Node: ${tab.nodeShell}` : `${tab.attach ? "Attach" : "Shell"}: ${tab.pod}`;
     case "terminal":
-      return tab.context ? `Terminal: ${contextLabel(tab.context)}` : "Terminal";
+      return `Terminal: ${contextLabel(tab.context)}`;
     case "apply":
       return "Apply Manifest";
     case "portforwards":
