@@ -22,6 +22,8 @@ interface Props {
   wide: boolean;
   active: boolean;
   selectedUid: string | null;
+  /** Select (via onSelect) and scroll to the row with this name once it's loaded. */
+  reveal?: { name: string; namespace?: string } | null;
   onSelect: (row: Row | null) => void;
   onOpen: (row: Row, background: boolean) => void;
   onCount: (n: number, total: number) => void;
@@ -109,7 +111,7 @@ function matches(row: Row, terms: string[]): boolean {
 }
 
 export function ResourceTable(props: Props) {
-  const { context, resource, namespace, filter, wide, selectedUid, onSelect, onOpen, onCount } = props;
+  const { context, resource, namespace, filter, wide, selectedUid, reveal, onSelect, onOpen, onCount } = props;
   const [columns, setColumns] = useState<Column[]>([]);
   const rowsRef = useRef(new Map<string, Row>());
   const [version, setVersion] = useState(0);
@@ -284,17 +286,21 @@ export function ResourceTable(props: Props) {
       else if (y + ROW_HEIGHT * 2 > el.scrollTop + el.clientHeight) el.scrollTop = y + ROW_HEIGHT * 2 - el.clientHeight;
     }
   };
-  // A selection made from outside (e.g. a pod opened from a deployment) may be off screen, or
-  // not loaded yet: bring it into view once its row exists.
+  // A selection made from outside (e.g. an owner opened from a pod) may be off screen, not
+  // loaded yet, or known only by name: bring it into view once its row exists.
   const revealed = useRef<string | null>(null);
   useEffect(() => {
-    if (!selectedUid || revealed.current === selectedUid) return;
-    const idx = visibleRows.rows.findIndex((r) => r.uid === selectedUid);
-    if (idx < 0) return;
-    revealed.current = selectedUid;
+    const rows = visibleRows.rows;
+    let idx = selectedUid ? rows.findIndex((r) => r.uid === selectedUid) : -1;
+    if (idx < 0 && reveal) {
+      idx = rows.findIndex((r) => r.name === reveal.name && (r.namespace || undefined) === (reveal.namespace || undefined));
+      if (idx >= 0) onSelect(rows[idx]);
+    }
+    if (idx < 0 || revealed.current === rows[idx].uid) return;
+    revealed.current = rows[idx].uid;
     scrollToRow(idx);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedUid, visibleRows.rows]);
+  }, [selectedUid, reveal, visibleRows.rows]);
 
   // Multi-select for bulk actions (restart where supported, delete everywhere it's allowed).
   const restartable = isRestartable(resource);

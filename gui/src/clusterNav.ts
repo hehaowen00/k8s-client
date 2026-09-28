@@ -1,10 +1,24 @@
 import { createContext, useContext } from "react";
-import type { ResourceInfo, Row } from "./api";
+import { openDetail, type Target } from "./actions";
 
 /**
- * Provided by a cluster view around its detail drawer: shows an object in the cluster view's own
- * list (switching resource type and selecting it) instead of opening a separate detail tab.
+ * Provided by a cluster view around its content: shows an object in that view's own list
+ * (switching resource type and selecting it) instead of opening a separate detail tab.
  */
-export const ClusterNavContext = createContext<((resource: ResourceInfo, row: Row) => void) | null>(null);
+export const ClusterNavContext = createContext<{ context: string; show: (t: Target) => void } | null>(null);
 
-export const useClusterNav = () => useContext(ClusterNavContext);
+/**
+ * Open a linked object (an owner, a related pod, a node…). Inside a cluster view on the same
+ * cluster it's shown in that view's list; otherwise, or when `background`, in a detail tab.
+ */
+export function useOpenObject() {
+  const nav = useContext(ClusterNavContext);
+  return (t: Target, background = false) => {
+    if (nav && !background && nav.context === t.context) nav.show(t);
+    else openDetail(t, { background });
+  };
+}
+
+/** Ctrl/Cmd or middle click: open in a background tab, as elsewhere in the app. */
+export const inBackground = (e: { ctrlKey: boolean; metaKey: boolean; button: number }) =>
+  e.ctrlKey || e.metaKey || e.button === 1;

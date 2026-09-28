@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, POD_RESOURCE, type Overview, type ResourceInfo } from "../api";
-import { openDetail } from "../actions";
+import { inBackground, useOpenObject } from "../clusterNav";
 import { useDiscovery } from "../hooks";
 import { clusterSpec, useUsageMap } from "../metrics";
 import { contextLabel } from "../store";
@@ -99,6 +99,7 @@ export function OverviewView({ context, namespace, active, onPick }: Props) {
   }, [data, nodeUsage]);
 
   const spec = useMemo(() => clusterSpec(context), [context]);
+  const openObject = useOpenObject();
 
   if (error && !data) return <div className="error-box">{error}</div>;
   if (!data) return <div className="empty">Loading overview…</div>;
@@ -211,7 +212,7 @@ export function OverviewView({ context, namespace, active, onPick }: Props) {
                   <tr
                     key={n.name}
                     className={nodeRes ? "clickable" : ""}
-                    onClick={() => nodeRes && openDetail({ context, resource: nodeRes, namespace: null, name: n.name })}
+                    onClick={(e) => nodeRes && openObject({ context, resource: nodeRes, namespace: null, name: n.name }, inBackground(e))}
                   >
                     <td>{n.name}</td>
                     <td className="muted">{n.roles.join(", ") || "—"}</td>

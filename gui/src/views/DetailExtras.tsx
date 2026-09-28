@@ -3,12 +3,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { matchesKind, useExtensions, type ExtPanel } from "../extensions";
 import { api, hasWorkloadLogs, isNode, POD_RESOURCE, type KubeObject, type ResourceInfo } from "../api";
-import { openDetail, type Target } from "../actions";
+import type { Target } from "../actions";
 import { useDiscovery } from "../hooks";
 import { useTabs } from "../store";
 import { ALL_NAMESPACES, formatAge, selectorString, statusTone, useNow } from "../util";
 import { ResourceTable } from "./ResourceTable";
-import { useClusterNav } from "../clusterNav";
+import { inBackground, useOpenObject } from "../clusterNav";
 import { toast } from "../components/Dialogs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -55,14 +55,18 @@ function ObjLink({
   namespace?: string | null;
 }) {
   const discovery = useDiscovery(target.context);
+  const openObject = useOpenObject();
   if (!name) return null;
   const res = discovery.data?.find((r) => r.group === group && r.kind === kind);
   if (!res) return <span>{name}</span>;
   return (
     <button
       className="link"
-      onClick={() =>
-        openDetail({ context: target.context, resource: res, namespace: res.namespaced ? namespace ?? target.namespace : null, name })
+      onClick={(e) =>
+        openObject(
+          { context: target.context, resource: res, namespace: res.namespaced ? namespace ?? target.namespace : null, name },
+          inBackground(e),
+        )
       }
     >
       {name}
@@ -289,6 +293,7 @@ function CronJobDetails({ obj, target }: { obj: KubeObject; target: Target }) {
   const st = obj.status ?? {};
   const discovery = useDiscovery(target.context);
   const jobRes = discovery.data?.find((r) => r.group === "batch" && r.kind === "Job");
+  const openObject = useOpenObject();
   const [jobs, setJobs] = useState<KubeObject[] | null>(null);
   const uid = obj.metadata?.uid;
   const load = useCallback(() => {
@@ -339,7 +344,10 @@ function CronJobDetails({ obj, target }: { obj: KubeObject; target: Target }) {
                 <tr
                   key={j.metadata?.uid}
                   className="clickable"
-                  onClick={() => jobRes && openDetail({ context: target.context, resource: jobRes, namespace: target.namespace, name: j.metadata.name })}
+                  onClick={(e) =>
+                    jobRes &&
+                    openObject({ context: target.context, resource: jobRes, namespace: target.namespace, name: j.metadata.name }, inBackground(e))
+                  }
                 >
                   <td>{j.metadata?.name}</td>
                   <td>
@@ -648,8 +656,7 @@ export function RelatedPods({
 }) {
   const [count, setCount] = useState<number | null>(null);
   const onCount = useCallback((n: number) => setCount(n), []);
-  // In a cluster view's drawer, opening a pod shows it in that view's Pods list.
-  const showInList = useClusterNav();
+  const openObject = useOpenObject();
   return (
     <Section title={`Pods${count !== null ? ` (${count})` : ""}`}>
       <div className="related-table" style={{ height: Math.min(360, 32 + Math.max(1, count ?? 3) * 30 + 6) }}>
@@ -666,9 +673,7 @@ export function RelatedPods({
           fieldSelector={fieldSelector}
           onSelect={() => {}}
           onOpen={(row, background) =>
-            showInList && !background
-              ? showInList(POD_RESOURCE, row)
-              : openDetail({ context: target.context, resource: POD_RESOURCE, namespace: row.namespace ?? null, name: row.name }, { background })
+            openObject({ context: target.context, resource: POD_RESOURCE, namespace: row.namespace ?? null, name: row.name }, background)
           }
           onCount={onCount}
         />
