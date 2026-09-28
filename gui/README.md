@@ -42,8 +42,9 @@ Feature parity with Lens is tracked item by item in [`../ROADMAP.md`](../ROADMAP
 - **MCP server** (off by default): a read-only MCP endpoint on `127.0.0.1` for AI assistants. Per cluster you
   choose the resource types, namespaces, and whether full objects (Secret values always redacted), logs and
   events are shared; otherwise only `kubectl get`-style rows are. Every request is shown in an access log.
-- **Settings**: theme (system / dark / light), kubeconfig sources, per-cluster options, Helm / kubectl /
-  shell, extensions, updates.
+- **Settings**: app-wide theme (system / dark / light), kubeconfig sources, Helm / kubectl / shell,
+  extensions, updates and the MCP server; each cluster has its own settings page (name, colour, icon,
+  namespaces, proxy, MCP access) from its context menu or the command palette.
 
 ## Shortcuts
 

@@ -4,7 +4,7 @@ import { api, type ContextInfo, type ResourceInfo } from "../api";
 import { loadDiscovery } from "../hooks";
 import { useSettings } from "../settings";
 import { useExtensions } from "../extensions";
-import { contextLabel, openCluster, openSession, openSingleton, pluralLabel, tabContext, tabTitle, useTabs } from "../store";
+import { contextLabel, openCluster, openClusterSettings, openSession, openSingleton, pluralLabel, tabContext, tabTitle, useTabs } from "../store";
 
 interface Command {
   id: string;
@@ -91,6 +91,7 @@ export function CommandPaletteHost() {
       { id: "apply", group: "Commands", label: "Apply Manifest", run: () => T.open({ kind: "apply", context: activeCtx, namespace: null }) },
       { id: "pf", group: "Commands", label: "Port Forwards", run: () => openSingleton("portforwards") },
       { id: "settings", group: "Commands", label: "Settings", hint: "Ctrl+,", run: () => openSingleton("settings") },
+      ...(activeCtx ? [{ id: "csettings", group: "Commands", label: `Cluster Settings: ${contextLabel(activeCtx)}`, run: () => openClusterSettings(activeCtx) }] : []),
       {
         id: "theme",
         group: "Commands",

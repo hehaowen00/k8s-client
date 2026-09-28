@@ -8,13 +8,13 @@ import { confirmDialog, toast } from "../components/Dialogs";
 import { openContextMenu } from "../components/ContextMenu";
 import { addClusterDialog } from "../components/AddClusterDialog";
 import { bumpContexts, useContexts, useSettings, NO_CLUSTERS } from "../settings";
-import { contextColor, contextIcon, contextDetail, contextLabel, openCluster, openSingleton, useTabs, type Tab } from "../store";
+import { contextColor, contextIcon, contextDetail, contextLabel, openCluster, openClusterSettings, openSingleton, useTabs, type Tab } from "../store";
 
 export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
   const { data, error, loading, reload } = useContexts();
   const clusters = useSettings((s) => s.settings?.clusters ?? NO_CLUSTERS);
   const updateCluster = useSettings((s) => s.updateCluster);
-  const { update, open } = useTabs();
+  const { update } = useTabs();
   const folders = useAsync(() => api.listKubeconfigFolders(), [useSettings((s) => s.contextsVersion)]);
   const [query, setQuery] = useState("");
 
@@ -100,7 +100,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
                   clusters[c.name]?.pinned
                     ? { label: "Unpin from Hotbar", onClick: () => updateCluster(c.name, { pinned: false }) }
                     : { label: "Pin to Hotbar", onClick: () => updateCluster(c.name, { pinned: true }) },
-                  { label: "Cluster Settings…", onClick: () => open({ kind: "settings", context: c.name }) },
+                  { label: "Cluster Settings", onClick: () => openClusterSettings(c.name) },
                   ...(c.source && folders.data?.some((f) => f.managed && c.source!.startsWith(f.path))
                     ? [
                         { separator: true, label: "" },
@@ -194,7 +194,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
             <span className="context-avatar tool">⚙</span>
             <span className="context-meta">
               <span className="context-name">Settings</span>
-              <span className="muted small">Theme, clusters, tools (Ctrl+,)</span>
+              <span className="muted small">Theme, kubeconfig, tools (Ctrl+,)</span>
             </span>
           </button>
           <button className="context-card" onClick={() => openSingleton("portforwards")}>

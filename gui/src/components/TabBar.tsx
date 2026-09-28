@@ -12,6 +12,7 @@ const ICONS: Record<Tab["kind"], string> = {
   apply: "⇪",
   portforwards: "⇄",
   settings: "⚙",
+  "cluster-settings": "⚙",
 };
 
 // Only macOS draws the window under the tab bar (overlay titlebar); elsewhere the native

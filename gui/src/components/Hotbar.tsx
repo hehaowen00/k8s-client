@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSettings, NO_CLUSTERS } from "../settings";
 import { usePref } from "../hooks";
-import { contextColor, contextIcon, contextLabel, openCluster, openSingleton, tabContext, useTabs } from "../store";
+import { contextColor, contextIcon, contextLabel, openCluster, openClusterSettings, openSingleton, tabContext, useTabs } from "../store";
 import { openContextMenu } from "./ContextMenu";
 
 /** Pinned clusters rail (Lens "hotbar"). Hidden until something is pinned. */
@@ -64,7 +64,7 @@ export function Hotbar() {
             onContextMenu={(e) =>
               openContextMenu(e, [
                 { label: "Open in New Tab", onClick: () => openCluster(ctx) },
-                { label: "Cluster Settings…", onClick: () => useTabs.getState().open({ kind: "settings", context: ctx }) },
+                { label: "Cluster Settings", onClick: () => openClusterSettings(ctx) },
                 { separator: true, label: "" },
                 { label: "Unpin", onClick: () => updateCluster(ctx, { pinned: false }) },
               ])
