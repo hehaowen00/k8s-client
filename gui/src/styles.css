@@ -1103,6 +1103,25 @@ mark {
   word-break: break-word;
   white-space: pre-wrap;
 }
+/* Errors: room for API messages and stack-like output, selectable for copying. */
+.modal.modal-wide {
+  width: min(680px, 92vw);
+}
+.modal-error {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  max-height: 50vh;
+  overflow: auto;
+  background: var(--bg-1);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--bad);
+  border-radius: 6px;
+  font-family: var(--mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
 .modal .input {
   width: 100%;
   margin-bottom: 14px;
@@ -1150,9 +1169,6 @@ mark {
 }
 .toast-ok {
   border-left: 3px solid var(--ok);
-}
-.toast-bad {
-  border-left: 3px solid var(--bad);
 }
 
 .rtable-check {
