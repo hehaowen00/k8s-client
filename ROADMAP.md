@@ -97,9 +97,8 @@ To update, change the marker and, for `[~]`, say what's missing. Run `pnpm roadm
 ## Terminal
 
 - [x] Pod shell (exec with TTY and resize)
-- [x] Local terminal
 - [x] Multiple terminals in tabs
-- [x] Local terminal pre-configured for the tab's cluster (KUBECONFIG + context)
+- [x] Cluster terminal: local shell pre-configured for the tab's cluster (KUBECONFIG + context + proxy)
 - [x] Per-cluster kubectl: downloads the release matching each cluster (SHA-256 verified) for its terminals
 
 ## Helm

@@ -86,7 +86,7 @@ function makeApi(ext: string, appVersion: string) {
     ui: {
       toast: (message: string, tone: "ok" | "bad" = "ok") => toast(message, tone),
       openDetail: (t: Target) => openDetail(t),
-      openTerminal: (context?: string) => useTabs.getState().open({ kind: "terminal", context: context ?? null }),
+      openTerminal: (context: string) => useTabs.getState().open({ kind: "terminal", context }),
     },
     // Read/apply helpers over the same backend the UI uses.
     k8s: {

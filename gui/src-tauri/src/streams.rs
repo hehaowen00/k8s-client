@@ -298,7 +298,7 @@ pub fn session_close(state: State<'_, AppState>, id: String) {
 pub async fn pty_start(
     app: AppHandle,
     state: State<'_, AppState>,
-    context: Option<String>,
+    context: String,
     cols: u16,
     rows: u16,
     channel: Channel<SessionEvent>,
@@ -317,27 +317,31 @@ pub async fn pty_start(
         cmd.cwd(home);
     }
     cmd.env("TERM", "xterm-256color");
-    // kubectl first on PATH: an explicit path from Settings, else (for cluster terminals)
-    // a downloaded kubectl matching the cluster's version.
+    // Point kubectl (and anything else reading KUBECONFIG) at this cluster only, through its proxy.
+    cmd.env("KUBECONFIG", state.scoped_kubeconfig(&app, &context).await?);
+    if let Some(p) = state.cluster_settings(&context).proxy_url.filter(|p| !p.trim().is_empty()) {
+        cmd.env("HTTPS_PROXY", &p);
+        cmd.env("HTTP_PROXY", &p);
+    }
+    // kubectl first on PATH: an explicit path from Settings, else a downloaded kubectl matching
+    // the cluster's version.
     let (kubectl_path, kubectl_auto) = {
         let s = state.settings.lock().unwrap();
         (s.kubectl_path.clone().filter(|p| !p.trim().is_empty()).map(std::path::PathBuf::from), s.kubectl_auto)
     };
     let mut kubectl = kubectl_path;
     if kubectl.is_none() && kubectl_auto {
-        if let Some(ctx) = &context {
-            let note = |m: &str| {
-                let _ = channel.send(SessionEvent::Data { data: format!("\x1b[2m{m}\x1b[0m\r\n") });
-            };
-            let version = match state.client(ctx).await {
-                Ok(c) => c.apiserver_version().await.ok().and_then(|v| crate::kubectl::normalize_version(&v.git_version)),
-                Err(_) => None,
-            };
-            if let Some(v) = version {
-                match crate::kubectl::ensure(&app, &v, note).await {
-                    Ok(p) => kubectl = Some(p),
-                    Err(e) => note(&format!("Using kubectl from PATH ({e})")),
-                }
+        let note = |m: &str| {
+            let _ = channel.send(SessionEvent::Data { data: format!("\x1b[2m{m}\x1b[0m\r\n") });
+        };
+        let version = match state.client(&context).await {
+            Ok(c) => c.apiserver_version().await.ok().and_then(|v| crate::kubectl::normalize_version(&v.git_version)),
+            Err(_) => None,
+        };
+        if let Some(v) = version {
+            match crate::kubectl::ensure(&app, &v, note).await {
+                Ok(p) => kubectl = Some(p),
+                Err(e) => note(&format!("Using kubectl from PATH ({e})")),
             }
         }
     }

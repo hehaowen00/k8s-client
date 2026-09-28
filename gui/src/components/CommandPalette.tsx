@@ -87,7 +87,6 @@ export function CommandPaletteHost() {
       { id: "new", group: "Commands", label: "New Tab", hint: "Ctrl+T", run: () => T.open({ kind: "home" }) },
       { id: "close", group: "Commands", label: "Close Tab", hint: "Ctrl+W", run: () => activeId && T.close(activeId) },
       { id: "split", group: "Commands", label: T.splitId ? "Close Split View" : "Split View", hint: "Ctrl+\\", run: () => T.toggleSplit() },
-      { id: "term", group: "Commands", label: "Local Terminal", hint: "Ctrl+`", run: () => openSession({ kind: "terminal" }) },
       ...(activeCtx ? [{ id: "cterm", group: "Commands", label: `Terminal for ${contextLabel(activeCtx)}`, run: () => openSession({ kind: "terminal", context: activeCtx }) }] : []),
       { id: "apply", group: "Commands", label: "Apply Manifest", run: () => T.open({ kind: "apply", context: activeCtx, namespace: null }) },
       { id: "pf", group: "Commands", label: "Port Forwards", run: () => openSingleton("portforwards") },

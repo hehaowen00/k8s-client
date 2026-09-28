@@ -344,7 +344,7 @@ export const api = {
     },
     channel: Channel<SessionEvent>,
   ) => invoke<string>("exec_start", { ...opts, channel }),
-  ptyStart: (opts: { cols: number; rows: number; context?: string | null }, channel: Channel<SessionEvent>) =>
+  ptyStart: (opts: { cols: number; rows: number; context: string }, channel: Channel<SessionEvent>) =>
     invoke<string>("pty_start", { ...opts, channel }),
   sessionWrite: (id: string, data: string) => invoke<void>("session_write", { id, data }),
   sessionResize: (id: string, cols: number, rows: number) =>
