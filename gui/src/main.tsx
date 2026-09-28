@@ -1,7 +1,6 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import App from "./App";
-import "@xterm/xterm/css/xterm.css";
 import "./styles.css";
 
 if (navigator.userAgent.includes("Mac")) document.documentElement.dataset.platform = "mac";
