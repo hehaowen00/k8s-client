@@ -15,6 +15,7 @@ import { NamespacePicker } from "../components/NamespacePicker";
 import { useExtensions, type ExtPage } from "../extensions";
 import { Select } from "../components/Select";
 import { Checkbox } from "../components/Checkbox";
+import { ClusterNavContext } from "../clusterNav";
 
 type ClusterTab = Extract<Tab, { kind: "cluster" }>;
 
@@ -31,7 +32,29 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
   const [kindFilter, setKindFilter] = useState("");
   const [collapsed, setCollapsed] = usePref<Record<string, boolean>>("sidebar.collapsed", { Other: true });
 
-  useEffect(() => setSelected(null), [tab.context, tab.resource?.kind, tab.resource?.group, tab.namespace]);
+  // Switching resource / namespace clears the selection, unless the switch was to show an object.
+  const pendingSelect = useRef<Row | null>(null);
+  useEffect(() => {
+    setSelected(pendingSelect.current);
+    pendingSelect.current = null;
+  }, [tab.context, tab.resource?.kind, tab.resource?.group, tab.namespace]);
+
+  /** Show an object in this view's own list: its resource type, a namespace that has it, selected. */
+  const showInList = useCallback(
+    (r: ResourceInfo, row: Row) => {
+      const resource = discovery.data?.find((d) => sameResource(d, r)) ?? r;
+      const ns = nsSelection(tab.namespace);
+      const namespace =
+        resource.namespaced && row.namespace && !ns.all && !ns.list.includes(row.namespace) ? row.namespace : tab.namespace;
+      if (sameResource(resource, tab.resource) && namespace === tab.namespace) {
+        setSelected(row);
+        return;
+      }
+      pendingSelect.current = row;
+      update(tab.id, { resource, page: undefined, namespace });
+    },
+    [discovery.data, tab.id, tab.namespace, tab.resource, update],
+  );
 
   const sections = useMemo(() => buildSections(discovery.data ?? [], kindFilter.toLowerCase()), [discovery.data, kindFilter]);
 
@@ -289,16 +312,18 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
               )}
               {selected && (
                 <Drawer>
-                  <DetailView
-                    key={selected.uid}
-                    context={tab.context}
-                    resource={tab.resource}
-                    namespace={selected.namespace ?? null}
-                    name={selected.name}
-                    active={active}
-                    compact
-                    onClose={() => setSelected(null)}
-                  />
+                  <ClusterNavContext.Provider value={showInList}>
+                    <DetailView
+                      key={selected.uid}
+                      context={tab.context}
+                      resource={tab.resource}
+                      namespace={selected.namespace ?? null}
+                      name={selected.name}
+                      active={active}
+                      compact
+                      onClose={() => setSelected(null)}
+                    />
+                  </ClusterNavContext.Provider>
                 </Drawer>
               )}
             </div>
