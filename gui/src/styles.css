@@ -10,6 +10,8 @@
   --text-faint: #5f6778;
   --accent: #7aa2ff;
   --accent-bg: #253457;
+  --tabbar-bg: #101216;
+  --tab-hover-bg: var(--bg-2);
   --ok: #7fd18b;
   --warn: #e5c07b;
   --bad: #ef6b73;
@@ -117,20 +119,28 @@ button {
 
 /* ------------------------------------------------------------------ tabs */
 
+/* Same look as git-client's tab bar: a sunken strip with the active tab raised into the
+   content below it. */
 .tabbar {
   display: flex;
   align-items: stretch;
-  height: 36px;
-  background: var(--bg);
+  gap: 1px;
+  padding: 0 4px;
+  background: var(--tabbar-bg);
   border-bottom: 1px solid var(--border);
   flex: none;
 }
 /* macOS: overlay titlebar, tab bar doubles as the drag region; room for traffic lights. */
 :root[data-platform="mac"] .tabbar {
-  padding-left: 90px;
+  padding-left: 78px;
+  min-height: 30px;
 }
 .tabstrip {
   display: flex;
+  align-items: stretch;
+  gap: 1px;
+  flex: 0 1 auto;
+  min-width: 0;
   overflow-x: auto;
   overflow-y: hidden;
   scrollbar-width: none;
@@ -142,34 +152,59 @@ button {
   display: flex;
   align-items: center;
   gap: 6px;
-  min-width: 120px;
-  max-width: 220px;
-  padding: 0 6px 0 10px;
-  border-right: 1px solid var(--border);
+  flex: none;
+  max-width: 240px;
+  min-width: 0;
+  padding: 6px 6px 6px 11px;
+  border: 1px solid transparent;
+  border-bottom: none;
   color: var(--text-dim);
   cursor: default;
+  user-select: none;
   position: relative;
-  flex: none;
+  transition: margin 120ms ease;
 }
 .tab:hover {
-  background: var(--bg-1);
-  color: var(--text);
+  background: var(--tab-hover-bg);
 }
 .tab.active {
-  background: var(--bg-2);
+  background: var(--bg-1);
+  border-color: var(--border);
   color: var(--text);
+  font-weight: 600;
 }
-.tab.active::after {
+/* Dragging a tab to reorder: neighbours slide aside to open a placeholder on the side the
+   drop would land on. */
+.tab.dragging {
+  opacity: 0.4;
+}
+.tab.drop-before {
+  margin-left: 78px;
+}
+.tab.drop-after {
+  margin-right: 78px;
+}
+.tab.drop-before::before,
+.tab.drop-after::after {
   content: "";
   position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 2px;
-  background: var(--accent);
+  top: 3px;
+  bottom: 0;
+  width: 72px;
+  background: var(--tab-hover-bg);
+  border: 1px dashed var(--accent);
+  border-bottom: none;
 }
-.tab.drop-target {
-  box-shadow: inset 2px 0 0 var(--accent);
+.tab.drop-before::before {
+  left: -76px;
+}
+.tab.drop-after::after {
+  right: -76px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .tab {
+    transition: none;
+  }
 }
 .tab-dot {
   width: 7px;
@@ -183,43 +218,46 @@ button {
   flex: none;
 }
 .tab-title {
-  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .tab-close {
-  border: 0;
-  background: transparent;
+  flex: none;
   width: 18px;
   height: 18px;
-  line-height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
   border-radius: 4px;
-  opacity: 0;
-  cursor: pointer;
   padding: 0;
   font-size: 15px;
+  font-weight: normal;
+  color: var(--text-dim);
+  cursor: pointer;
+  opacity: 0;
 }
 .tab:hover .tab-close,
 .tab.active .tab-close {
-  opacity: 0.6;
+  opacity: 1;
 }
 .tab-close:hover {
-  opacity: 1 !important;
-  background: var(--bg-3);
+  background: var(--border);
+  color: var(--text);
 }
 .tab-new {
+  flex: none;
   border: 0;
   background: transparent;
-  width: 36px;
+  padding: 0 12px;
   font-size: 18px;
   color: var(--text-dim);
   cursor: pointer;
-  flex: none;
 }
 .tab-new:hover {
   color: var(--text);
-  background: var(--bg-1);
 }
 .tab-new.active {
   color: var(--accent);
@@ -1678,6 +1716,8 @@ mark {
   --text-faint: #8a939e;
   --accent: #2a78d6;
   --accent-bg: #dce9fb;
+  --tabbar-bg: #eceef1;
+  --tab-hover-bg: #f2f3f5;
   --ok: #1a7f37;
   --warn: #9a6700;
   --bad: #cf222e;
@@ -2086,7 +2126,7 @@ button.ns-option {
   opacity: 0.4;
 }
 .tab.split {
-  background: var(--bg-1);
+  background: var(--tab-hover-bg);
   color: var(--text);
   box-shadow: inset 0 -2px 0 var(--text-faint);
 }
@@ -2362,16 +2402,6 @@ button.ns-option {
   font-size: 14px;
   width: 16px;
   text-align: center;
-}
-.tab-close {
-  width: 22px;
-  height: 22px;
-  line-height: 20px;
-  font-size: 18px;
-}
-.tab-new {
-  font-size: 22px;
-  width: 40px;
 }
 .chev {
   font-size: 11px;
