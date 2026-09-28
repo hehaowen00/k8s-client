@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { contextColor, tabContext, tabTitle, useTabs, type Tab, contextLabel } from "../store";
 import { openContextMenu } from "./ContextMenu";
 
@@ -14,11 +14,56 @@ const ICONS: Record<Tab["kind"], string> = {
   settings: "⚙",
 };
 
+// Only macOS draws the window under the tab bar (overlay titlebar); elsewhere the native
+// titlebar stays, so the bar must not act as one.
+const OVERLAY_TITLEBAR = navigator.userAgent.includes("Mac");
+
 export function TabBar() {
   const { tabs, activeId, splitId, setSplit, activate, close, closeOthers, closeRight, open, move } = useTabs();
   const [dragIdx, setDragIdx] = useState<number | null>(null);
-  const [overIdx, setOverIdx] = useState<number | null>(null);
+  // Where the dragged tab would land: before or after the tab at `idx`.
+  const [over, setOver] = useState<{ idx: number; after: boolean } | null>(null);
   const stripRef = useRef<HTMLDivElement>(null);
+
+  const endDrag = () => {
+    setDragIdx(null);
+    setOver(null);
+  };
+
+  // The webview doesn't reliably deliver dragend to the source tab (drops outside the window,
+  // cancelled drags), so any later press clears a stale drag.
+  useEffect(() => {
+    const events = ["dragend", "drop", "pointerdown"] as const;
+    events.forEach((ev) => window.addEventListener(ev, endDrag));
+    return () => events.forEach((ev) => window.removeEventListener(ev, endDrag));
+  }, []);
+
+  const halfOf = (e: React.DragEvent) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    return e.clientX > box.left + box.width / 2;
+  };
+
+  // Index of the neighbouring strip tab (the home tab isn't shown), or -1.
+  const neighbour = (i: number, after: boolean) => {
+    for (let j = after ? i + 1 : i - 1; j >= 0 && j < tabs.length; j += after ? 1 : -1) {
+      if (tabs[j].kind !== "home") return j;
+    }
+    return -1;
+  };
+
+  // Dropping on the dragged tab's own edges wouldn't move it, so don't promise a move.
+  const wouldMove = (i: number, after: boolean) =>
+    dragIdx !== null && dragIdx !== i && neighbour(i, after) !== dragIdx;
+
+  const drop = (i: number, after: boolean) => {
+    const from = dragIdx;
+    const moves = wouldMove(i, after);
+    endDrag();
+    if (from === null || !moves) return;
+    let to = after ? i + 1 : i;
+    if (from < to) to -= 1;
+    move(from, to);
+  };
 
   const duplicate = (t: Tab) => {
     const { id: _id, ...rest } = t;
@@ -26,7 +71,7 @@ export function TabBar() {
   };
 
   return (
-    <div className="tabbar" data-tauri-drag-region>
+    <div className="tabbar" data-tauri-drag-region={OVERLAY_TITLEBAR || undefined}>
       <div
         className="tabstrip"
         ref={stripRef}
@@ -43,29 +88,33 @@ export function TabBar() {
           return (
             <div
               key={t.id}
-              className={`tab ${t.id === activeId ? "active" : ""} ${t.id === splitId ? "split" : ""} ${overIdx === i && dragIdx !== i ? "drop-target" : ""}`}
+              className={`tab ${t.id === activeId ? "active" : ""} ${t.id === splitId ? "split" : ""} ${dragIdx === i ? "dragging" : ""} ${over?.idx === i ? (over.after ? "drop-after" : "drop-before") : ""}`}
               title={ctx && t.kind !== "cluster" ? `${tabTitle(t)} — ${contextLabel(ctx)}` : tabTitle(t)}
               draggable
               onDragStart={(e) => {
-                setDragIdx(i);
+                // Snapshot the tab where it was grabbed, before the dimmed class lands.
+                const box = e.currentTarget.getBoundingClientRect();
+                e.dataTransfer.setDragImage(e.currentTarget, e.clientX - box.left, e.clientY - box.top);
+                e.dataTransfer.setData("text/plain", t.id);
                 e.dataTransfer.effectAllowed = "move";
+                setDragIdx(i);
               }}
               onDragOver={(e) => {
+                if (dragIdx === null) return;
                 e.preventDefault();
-                setOverIdx(i);
+                e.dataTransfer.dropEffect = "move";
+                const after = halfOf(e);
+                setOver(wouldMove(i, after) ? { idx: i, after } : null);
               }}
-              onDragLeave={() => setOverIdx(null)}
+              onDragLeave={() => {
+                if (over?.idx === i) setOver(null);
+              }}
               onDrop={(e) => {
                 e.preventDefault();
-                if (dragIdx !== null && dragIdx !== i) move(dragIdx, i);
-                setDragIdx(null);
-                setOverIdx(null);
+                drop(i, halfOf(e));
               }}
-              onDragEnd={() => {
-                setDragIdx(null);
-                setOverIdx(null);
-              }}
-              onMouseDown={(e) => {
+              onDragEnd={endDrag}
+              onPointerDown={(e) => {
                 if (e.button === 0) activate(t.id);
               }}
               onClick={() => activate(t.id)}
@@ -93,7 +142,7 @@ export function TabBar() {
               <span className="tab-title">{tabTitle(t)}</span>
               <button
                 className="tab-close"
-                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => close(t.id)}
                 aria-label="Close tab"
               >
