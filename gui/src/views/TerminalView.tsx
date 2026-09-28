@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
-import { Terminal } from "@xterm/xterm";
-import { FitAddon } from "@xterm/addon-fit";
-import { WebLinksAddon } from "@xterm/addon-web-links";
+import { init as initGhostty, Terminal, FitAddon } from "ghostty-web";
 import { api, POD_RESOURCE, type SessionEvent } from "../api";
 import { useAsync } from "../hooks";
 import { useTabs, type Tab, contextLabel } from "../store";
@@ -10,6 +8,10 @@ import { useResolvedTheme, useSettings } from "../settings";
 import { Select } from "../components/Select";
 
 type TermTab = Extract<Tab, { kind: "exec" | "terminal" }>;
+
+// Ghostty's VT core is WASM (inlined in the bundle); load it once for every terminal.
+let ghosttyReady: Promise<void> | null = null;
+const loadGhostty = () => (ghosttyReady ??= initGhostty());
 
 const THEME = {
   background: "#14161b",
@@ -65,6 +67,8 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
+  // Set once the terminal is open; sessions connect to whichever terminal is current.
+  const [term, setTerm] = useState<Terminal | null>(null);
   const [session, setSession] = useState<{ state: "connecting" | "open" | "closed"; message?: string }>({
     state: "connecting",
   });
@@ -91,54 +95,66 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
     : null;
   const ready = !isExec || !!nodeShell || !!container || !pod.loading;
 
-  // Create the terminal once.
+  // Create the terminal. ghostty-web resolves colours into cells as they're written, so a theme
+  // can't change after open(): a dark/light switch makes a new terminal (and a new session).
+  // URLs and OSC 8 links are built in (Ctrl/Cmd+click).
   useEffect(() => {
-    const term = new Terminal({
-      fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, Menlo, monospace",
-      fontSize,
-      cursorBlink: true,
-      scrollback: 10000,
-      theme: theme === "dark" ? THEME : THEME_LIGHT,
-      allowProposedApi: true,
+    let term: Terminal | null = null;
+    let cancelled = false;
+    loadGhostty().then(() => {
+      if (cancelled || !hostRef.current) return;
+      term = new Terminal({
+        fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, Menlo, monospace",
+        fontSize: useSettings.getState().settings?.terminalFontSize ?? 13,
+        cursorBlink: true,
+        scrollback: 10000,
+        theme: theme === "dark" ? THEME : THEME_LIGHT,
+      });
+      open(term);
     });
+    return () => {
+      cancelled = true;
+      term?.dispose();
+      termRef.current = null;
+      fitRef.current = null;
+      setTerm(null);
+    };
+  }, [theme]);
+
+  function open(term: Terminal) {
     const fit = new FitAddon();
     term.loadAddon(fit);
-    term.loadAddon(new WebLinksAddon());
     term.open(hostRef.current!);
     termRef.current = term;
     fitRef.current = fit;
-    // Let app-level tab shortcuts through instead of sending them to the shell.
+    // Keep app-level tab shortcuts and copy / paste away from the shell. Unlike xterm.js,
+    // returning true here means "handled": the terminal skips the key.
     term.attachCustomKeyEventHandler((e) => {
       const mod = e.ctrlKey || e.metaKey;
-      if (mod && (e.key === "Tab" || e.key === "PageUp" || e.key === "PageDown" || /^[1-9]$/.test(e.key))) return false;
+      if (mod && (e.key === "Tab" || e.key === "PageUp" || e.key === "PageDown" || /^[1-9]$/.test(e.key))) return true;
       if (mod && e.shiftKey && (e.key === "C" || e.key === "V")) {
         if (e.type === "keydown") {
           if (e.key === "C") navigator.clipboard.writeText(term.getSelection());
           else navigator.clipboard.readText().then((t) => term.paste(t));
         }
-        return false;
+        return true;
       }
-      return true;
+      return false;
     });
-    requestAnimationFrame(() => fit.fit());
-    return () => {
-      term.dispose();
-      termRef.current = null;
-    };
-  }, []);
+    fit.fit();
+    setTerm(term);
+  }
 
-  // Follow theme / font-size changes.
+  // Follow font-size changes.
   useEffect(() => {
     const term = termRef.current;
-    if (!term) return;
-    term.options.theme = theme === "dark" ? THEME : THEME_LIGHT;
+    if (!term || term.options.fontSize === fontSize) return;
     term.options.fontSize = fontSize;
     fitRef.current?.fit();
-  }, [theme, fontSize]);
+  }, [fontSize]);
 
   // Connect a session.
   useEffect(() => {
-    const term = termRef.current;
     if (!term || !ready) return;
     let id: string | null = null;
     let disposed = false;
@@ -166,7 +182,7 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
       api.deleteResource(ref).catch(() => {});
     };
     const start = (async () => {
-      if (tab.kind !== "exec") return api.ptyStart({ ...size, context: tab.context ?? null }, channel);
+      if (tab.kind !== "exec") return api.ptyStart({ ...size, context: tab.context }, channel);
       if (nodeShell) {
         term.write(`\x1b[2mStarting node shell pod on ${nodeShell}…\x1b[0m\r\n`);
         const created = await api.nodeShellCreate(tab.context, nodeShell);
@@ -219,7 +235,7 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
       deleteShellPod();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, container, nonce]);
+  }, [term, ready, container, nonce]);
 
   // Fit on container resize and when the tab becomes visible.
   useEffect(() => {

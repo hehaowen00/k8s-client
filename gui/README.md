@@ -32,7 +32,7 @@ Feature parity with Lens is tracked item by item in [`../ROADMAP.md`](../ROADMAP
   Actions you're not allowed to perform are disabled (SelfSubjectAccessReview).
 - **Logs**: single container, all containers, or a whole workload (following rollouts); tail, since,
   timestamps, previous, wrap, ANSI colours, search / filter, pod filter, save.
-- **Terminals**: pod shells and attach (xterm.js), and cluster terminals: a local shell with
+- **Terminals**: pod shells and attach (Ghostty VT via ghostty-web), and cluster terminals: a local shell with
   `KUBECONFIG` scoped to that cluster (and its proxy), using a kubectl downloaded to match the cluster version.
 - **Metrics**: live usage from metrics-server; history from Prometheus when present (auto-detected and
   queried through the API server's service proxy), otherwise sampled while Kube Portal is open.
