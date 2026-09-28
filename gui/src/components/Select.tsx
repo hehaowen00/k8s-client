@@ -225,7 +225,7 @@ export function Select({ value, onChange, children, className, title, disabled, 
               <input
                 className="input select-search"
                 autoFocus
-                placeholder="Filter…"
+                placeholder="Filter"
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);

@@ -273,7 +273,7 @@ export function targetMenu(
         ? { label: "Uncordon", disabled: !p.patch, onClick: () => setCordon(t, false) }
         : { label: "Cordon", disabled: !p.patch, onClick: () => setCordon(t, true) },
     );
-    items.push({ label: "Drain…", disabled: !p.patch || !p.evict, onClick: () => drainTarget(t) });
+    items.push({ label: "Drain", disabled: !p.patch || !p.evict, onClick: () => drainTarget(t) });
   }
   if (isCronJob(t.resource)) {
     // The Table's "Suspend" column reads True/False.
@@ -288,14 +288,14 @@ export function targetMenu(
   }
   if (canPortForward(t.resource)) {
     if (!isPod(t.resource)) items.push({ separator: true, label: "" });
-    items.push({ label: "Port Forward…", disabled: !p.portForward, onClick: () => portForwardTarget(t) });
+    items.push({ label: "Port Forward", disabled: !p.portForward, onClick: () => portForwardTarget(t) });
   }
   if (hasWorkloadLogs(t.resource)) {
     items.push({ separator: true, label: "" });
     items.push({ label: "Logs (all pods)", onClick: () => openWorkloadLogs(t) });
   }
   if (isScalable(t.resource) || isRestartable(t.resource)) items.push({ separator: true, label: "" });
-  if (isScalable(t.resource)) items.push({ label: "Scale…", disabled: !p.patch, onClick: () => scaleTarget(t, extra?.replicas) });
+  if (isScalable(t.resource)) items.push({ label: "Scale", disabled: !p.patch, onClick: () => scaleTarget(t, extra?.replicas) });
   if (isRestartable(t.resource)) items.push({ label: "Restart", disabled: !p.patch, onClick: () => restartTarget(t) });
   const extActions = useExtensions.getState().actions.filter((a) => matchesKind(a.kinds, t.resource));
   if (extActions.length) {

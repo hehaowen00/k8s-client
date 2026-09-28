@@ -65,7 +65,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
             {(data?.length ?? 0) > 8 && (
               <input
                 className="input"
-                placeholder="Filter clusters…"
+                placeholder="Filter clusters"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -154,7 +154,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
         <div className="home-section-title">
           <span>Kubeconfig folders</span>
           <button className="btn btn-sm" onClick={addFolder}>
-            + Add folder…
+            + Add folder
           </button>
         </div>
         <div className="folders">
