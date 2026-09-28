@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, type FolderInfo } from "../api";
-import { EMPTY_CLUSTER, bumpContexts, useContexts, useSettings, type ClusterSettings, type Settings } from "../settings";
+import { EMPTY_CLUSTER, NO_MCP, bumpContexts, useContexts, useSettings, type ClusterSettings, type McpAccess, type Settings } from "../settings";
+import { useDiscovery } from "../hooks";
 import { contextColor, contextLabel, useTabs, type Tab } from "../store";
-import { toast } from "../components/Dialogs";
+import { alertDialog, toast } from "../components/Dialogs";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useExtensions } from "../extensions";
 import { Select } from "../components/Select";
@@ -29,15 +30,25 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 /** Text input that commits on blur / Enter instead of every keystroke. */
 /** Downscale an image file to a 64px square (cover-cropped) PNG data URL, so settings stay small. */
 async function iconDataUrl(file: File): Promise<string> {
-  const img = await createImageBitmap(file);
-  const size = 64;
-  const canvas = document.createElement("canvas");
-  canvas.width = canvas.height = size;
-  const scale = Math.max(size / img.width, size / img.height);
-  const w = img.width * scale;
-  const h = img.height * scale;
-  canvas.getContext("2d")!.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
-  return canvas.toDataURL("image/png");
+  // <img> decodes anything the webview can display (SVG, ICO, HEIC); createImageBitmap rejects several of those.
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.src = url;
+    await img.decode();
+    const size = 64;
+    const iw = img.naturalWidth || size;
+    const ih = img.naturalHeight || size;
+    const canvas = document.createElement("canvas");
+    canvas.width = canvas.height = size;
+    const scale = Math.max(size / iw, size / ih);
+    const w = iw * scale;
+    const h = ih * scale;
+    canvas.getContext("2d")!.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
+    return canvas.toDataURL("image/png");
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function CommitInput({ value, onCommit, placeholder, className }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string }) {
@@ -185,13 +196,16 @@ export function SettingsView({ tab }: { tab: Extract<Tab, { kind: "settings" }> 
                       accept="image/*"
                       hidden
                       onChange={async (e) => {
-                        const file = e.target.files?.[0];
-                        e.target.value = "";
+                        const input = e.currentTarget;
+                        const file = input.files?.[0];
                         if (!file) return;
                         try {
                           setCluster_({ icon: await iconDataUrl(file) });
-                        } catch {
-                          toast("Couldn't read that image", "bad");
+                        } catch (err) {
+                          console.error("icon decode failed", file.type, err);
+                          alertDialog("Couldn't read that image", `${file.name} (${file.type || "unknown type"}, ${file.size} bytes)\n\n${err}`);
+                        } finally {
+                          input.value = "";
                         }
                       }}
                     />
@@ -227,9 +241,12 @@ export function SettingsView({ tab }: { tab: Extract<Tab, { kind: "settings" }> 
               <Field label="Proxy" hint="http://, https:// or socks5:// — used for the API server, Helm and terminals">
                 <CommitInput className="wide-input" value={cs.proxyUrl ?? ""} placeholder="none" onCommit={(v) => setCluster_({ proxyUrl: v.trim() || null })} />
               </Field>
+              <McpClusterAccess cluster={cluster} value={cs.mcp ?? NO_MCP} onChange={(mcp) => setCluster_({ mcp })} />
             </>
           )}
         </section>
+
+        <McpSection settings={settings} set={set} />
 
         <section className="settings-section">
           <h2>Tools</h2>
@@ -401,6 +418,198 @@ function ExtensionsSection() {
           </button>
           {changed && <span className="muted small">Reload to apply changes</span>}
         </div>
+      </Field>
+    </section>
+  );
+}
+
+const splitList = (v: string) =>
+  v
+    .split(/[,\s]+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+/** Per-cluster MCP sharing: which resource types, namespaces and data. */
+function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value: McpAccess; onChange: (v: McpAccess) => void }) {
+  const set = (p: Partial<McpAccess>) => onChange({ ...value, ...p });
+  const discovery = useDiscovery(value.enabled ? cluster : null);
+  const [filter, setFilter] = useState("");
+  const ids = useMemo(() => {
+    const found = (discovery.data ?? []).map((r) => (r.group ? `${r.plural}.${r.group}` : r.plural));
+    return [...new Set([...value.resources, ...found])].sort();
+  }, [discovery.data, value.resources]);
+  const selected = new Set(value.resources);
+  const shown = ids.filter((id) => id.includes(filter.trim().toLowerCase()));
+  return (
+    <>
+      <Field label="MCP access" hint="What AI assistants connected to Kube Portal's MCP server can read. Nothing is shared by default">
+        <Checkbox checked={value.enabled} onChange={(e) => set({ enabled: e.target.checked })}>
+          Share this cluster
+        </Checkbox>
+      </Field>
+      {value.enabled && (
+        <>
+          <Field label="Resource types" hint={`${value.resources.length} shared, as kubectl-style tables`}>
+            <input className="input wide-input" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <div className="folders mcp-resources">
+              {discovery.loading && <div className="folder-row muted small">Loading resource types…</div>}
+              {discovery.error && <div className="folder-row small">{discovery.error}</div>}
+              {shown.map((id) => (
+                <div key={id} className="folder-row">
+                  <Checkbox
+                    checked={selected.has(id)}
+                    onChange={(e) => set({ resources: e.target.checked ? [...value.resources, id] : value.resources.filter((x) => x !== id) })}
+                  >
+                    <span className="mono small">{id}</span>
+                  </Checkbox>
+                </div>
+              ))}
+            </div>
+            <div className="swatches">
+              <button className="btn btn-xs" onClick={() => set({ resources: [...new Set([...value.resources, ...shown])] })}>
+                Select {filter.trim() ? "shown" : "all"}
+              </button>
+              <button className="btn btn-xs btn-ghost" onClick={() => set({ resources: filter.trim() ? value.resources.filter((x) => !shown.includes(x)) : [] })}>
+                Clear {filter.trim() ? "shown" : "all"}
+              </button>
+            </div>
+          </Field>
+          <Field label="MCP namespaces" hint="Comma-separated; empty = all namespaces">
+            <CommitInput className="wide-input" value={value.namespaces.join(", ")} placeholder="all namespaces" onCommit={(v) => set({ namespaces: splitList(v) })} />
+          </Field>
+          <Field label="MCP data" hint="Without these, only table rows (what kubectl get shows) are shared">
+            <Checkbox checked={value.objects} onChange={(e) => set({ objects: e.target.checked })}>
+              Full objects (YAML; Secret values are always redacted)
+            </Checkbox>
+            <Checkbox checked={value.logs} onChange={(e) => set({ logs: e.target.checked })}>
+              Pod logs
+            </Checkbox>
+            <Checkbox checked={value.events} onChange={(e) => set({ events: e.target.checked })}>
+              Events
+            </Checkbox>
+          </Field>
+        </>
+      )}
+    </>
+  );
+}
+
+interface McpStatus {
+  running: boolean;
+  url?: string | null;
+  error?: string | null;
+}
+
+interface McpAccessEntry {
+  timeMs: number;
+  tool: string;
+  cluster: string;
+  target: string;
+  outcome: "ok" | "denied" | "error";
+  detail: string;
+}
+
+function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Settings>) => void }) {
+  const [status, setStatus] = useState<McpStatus | null>(null);
+  const [log, setLog] = useState<McpAccessEntry[]>([]);
+  const [showToken, setShowToken] = useState(false);
+  useEffect(() => {
+    const refresh = () => invoke<McpStatus>("mcp_status").then(setStatus, () => {});
+    refresh();
+    invoke<McpAccessEntry[]>("mcp_access_log").then(setLog, () => {});
+    const un = [listen("mcp-status", refresh), listen<McpAccessEntry>("mcp-access", (e) => setLog((l) => [...l.slice(-499), e.payload]))];
+    return () => un.forEach((p) => p.then((f) => f()));
+  }, []);
+
+  const token = settings.mcpToken ?? "";
+  const url = status?.url ?? `http://127.0.0.1:${settings.mcpPort}/mcp`;
+  const shared = Object.entries(settings.clusters).filter(([, c]) => c.mcp?.enabled);
+  const copy = (text: string) => navigator.clipboard.writeText(text).then(() => toast("Copied"));
+  const claudeCmd = `claude mcp add --transport http kube-portal ${url} --header "Authorization: Bearer ${token}"`;
+  const jsonConfig = JSON.stringify({ mcpServers: { "kube-portal": { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
+
+  return (
+    <section className="settings-section">
+      <h2>MCP server</h2>
+      <Field label="Server" hint="Read-only, on this machine only (127.0.0.1), while Kube Portal is open">
+        <Checkbox checked={settings.mcpEnabled} onChange={(e) => set({ mcpEnabled: e.target.checked })}>
+          Enable MCP server
+        </Checkbox>
+        {status?.running && <span className="muted small">Listening on <span className="mono">{status.url}</span></span>}
+        {status?.error && <span className="small mcp-bad">{status.error}</span>}
+      </Field>
+      <Field label="Port">
+        <CommitInput
+          className="narrow-input"
+          value={String(settings.mcpPort)}
+          onCommit={(v) => {
+            const n = Number(v);
+            if (Number.isInteger(n) && n >= 1024 && n <= 65535) set({ mcpPort: n });
+            else toast("Port must be 1024–65535", "bad");
+          }}
+        />
+      </Field>
+      <Field label="Shared clusters" hint="Choose per cluster under Clusters → MCP access">
+        <span className="small">{shared.length ? shared.map(([id]) => contextLabel(id)).join(", ") : <span className="muted">None yet</span>}</span>
+      </Field>
+      {settings.mcpEnabled && token && (
+        <Field label="Connect a client" hint="Anyone with the token can read what you share">
+          <div className="swatches">
+            <span className="mono small">{showToken ? token : "•".repeat(16)}</span>
+            <button className="btn btn-xs btn-ghost" onClick={() => setShowToken((v) => !v)}>
+              {showToken ? "Hide" : "Show"}
+            </button>
+            <button
+              className="btn btn-xs btn-ghost"
+              onClick={() => invoke("mcp_regenerate_token").then(() => useSettings.getState().load(), (e) => toast(String(e), "bad"))}
+            >
+              Regenerate
+            </button>
+          </div>
+          <div className="swatches">
+            <button className="btn btn-xs" onClick={() => copy(claudeCmd)}>
+              Copy Claude Code command
+            </button>
+            <button className="btn btn-xs" onClick={() => copy(jsonConfig)}>
+              Copy JSON config
+            </button>
+          </div>
+        </Field>
+      )}
+      <Field label="Access log" hint="Every MCP request since Kube Portal started (last 500)">
+        {log.length ? (
+          <>
+            <div className="mcp-log">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Time</th>
+                    <th>Cluster</th>
+                    <th>Tool</th>
+                    <th>Target</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[...log].reverse().map((e, i) => (
+                    <tr key={log.length - i} className={e.outcome === "ok" ? "" : "mcp-bad"}>
+                      <td className="mono">{new Date(e.timeMs).toLocaleTimeString()}</td>
+                      <td>{e.cluster ? contextLabel(e.cluster) : ""}</td>
+                      <td className="mono">{e.tool}</td>
+                      <td className="mono">{e.target}</td>
+                      <td>{e.outcome === "ok" ? e.detail : `${e.outcome}: ${e.detail}`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <button className="btn btn-xs btn-ghost" onClick={() => invoke("mcp_clear_log").then(() => setLog([]))}>
+              Clear
+            </button>
+          </>
+        ) : (
+          <span className="muted small">No requests yet</span>
+        )}
       </Field>
     </section>
   );

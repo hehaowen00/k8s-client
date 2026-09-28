@@ -39,6 +39,9 @@ Feature parity with Lens is tracked item by item in [`../ROADMAP.md`](../ROADMAP
 - **Helm**: releases (details, values, manifest, history, upgrade, rollback, uninstall), chart browser with
   README / values / install, repository management. Uses your `helm` CLI and repositories.
 - **Port forwarding** for pods and services, with open-in-browser and a list of active forwards.
+- **MCP server** (off by default): a read-only MCP endpoint on `127.0.0.1` for AI assistants. Per cluster you
+  choose the resource types, namespaces, and whether full objects (Secret values always redacted), logs and
+  events are shared; otherwise only `kubectl get`-style rows are. Every request is shown in an access log.
 - **Settings**: theme (system / dark / light), kubeconfig sources, per-cluster options, Helm / kubectl /
   shell, extensions, updates.
 

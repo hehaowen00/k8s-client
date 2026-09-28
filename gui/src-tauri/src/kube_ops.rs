@@ -31,7 +31,7 @@ pub struct ResourceInfo {
 }
 
 impl ResourceInfo {
-    fn api_resource(&self) -> ApiResource {
+    pub(crate) fn api_resource(&self) -> ApiResource {
         ApiResource {
             group: self.group.clone(),
             version: self.version.clone(),
@@ -45,7 +45,7 @@ impl ResourceInfo {
         }
     }
 
-    fn collection_url(&self, namespace: Option<&str>) -> String {
+    pub(crate) fn collection_url(&self, namespace: Option<&str>) -> String {
         let base = if self.group.is_empty() {
             format!("/api/{}", self.version)
         } else {
@@ -59,7 +59,7 @@ impl ResourceInfo {
         }
     }
 
-    fn api(&self, client: Client, namespace: Option<&str>) -> Api<DynamicObject> {
+    pub(crate) fn api(&self, client: Client, namespace: Option<&str>) -> Api<DynamicObject> {
         let ar = self.api_resource();
         match namespace {
             Some(ns) if self.namespaced && !ns.is_empty() => {
@@ -82,8 +82,12 @@ pub async fn discover(
     context: String,
     refresh: Option<bool>,
 ) -> Result<Arc<Vec<ResourceInfo>>> {
-    if !refresh.unwrap_or(false) {
-        if let Some(d) = state.cached_discovery(&context).await {
+    discover_resources(&state, &context, refresh.unwrap_or(false)).await
+}
+
+pub(crate) async fn discover_resources(state: &AppState, context: &str, refresh: bool) -> Result<Arc<Vec<ResourceInfo>>> {
+    if !refresh {
+        if let Some(d) = state.cached_discovery(context).await {
             return Ok(d);
         }
     }
@@ -111,7 +115,7 @@ pub async fn discover(
         }
     }
     let out = Arc::new(out);
-    state.store_discovery(&context, out.clone()).await;
+    state.store_discovery(context, out.clone()).await;
     Ok(out)
 }
 
@@ -252,7 +256,7 @@ fn is_table(v: &Value) -> bool {
     v["kind"] == "Table"
 }
 
-async fn list_table(
+pub(crate) async fn list_table(
     client: &Client,
     url: &str,
     res: &ResourceInfo,
@@ -418,7 +422,7 @@ pub async fn watch_resources(
     Ok(id)
 }
 
-fn urlencode(s: &str) -> String {
+pub(crate) fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
             b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
@@ -492,7 +496,7 @@ pub fn stop_stream(state: State<'_, AppState>, id: String) {
 // Single-object operations
 // ---------------------------------------------------------------------------
 
-fn strip_noise(v: &mut Value) {
+pub(crate) fn strip_noise(v: &mut Value) {
     if let Some(meta) = v.get_mut("metadata").and_then(Value::as_object_mut) {
         meta.remove("managedFields");
     }
