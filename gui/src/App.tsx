@@ -13,7 +13,7 @@ import { PortForwardsView } from "./views/PortForwardsView";
 import { PortForwardDialogHost } from "./components/PortForwardDialog";
 import { AddClusterDialogHost } from "./components/AddClusterDialog";
 import { Hotbar } from "./components/Hotbar";
-import { SettingsView } from "./views/SettingsView";
+import { ClusterSettingsView, SettingsView } from "./views/SettingsView";
 import { useResolvedTheme, useSettings, useSettingsBootstrap } from "./settings";
 import { dock, isDockHost, openSingleton } from "./store";
 import { CommandPaletteHost, openPalette } from "./components/CommandPalette";
@@ -38,7 +38,9 @@ function TabContent({ tab, active }: { tab: Tab; active: boolean }) {
     case "portforwards":
       return <PortForwardsView active={active} />;
     case "settings":
-      return <SettingsView tab={tab} />;
+      return <SettingsView />;
+    case "cluster-settings":
+      return <ClusterSettingsView tab={tab} />;
   }
 }
 

@@ -53,7 +53,8 @@ export type Tab = TabBase &
     | { kind: "terminal"; context: string }
     | { kind: "apply"; context: string | null; namespace: string | null }
     | { kind: "portforwards" }
-    | { kind: "settings"; context?: string | null }
+    | { kind: "settings" }
+    | { kind: "cluster-settings"; context: string }
   );
 
 export type NewTab = Tab extends infer T ? (T extends Tab ? Omit<T, "id"> : never) : never;
@@ -239,6 +240,8 @@ export function tabTitle(tab: Tab): string {
       return "Port Forwards";
     case "settings":
       return "Settings";
+    case "cluster-settings":
+      return `Settings: ${contextLabel(tab.context)}`;
   }
 }
 
@@ -260,6 +263,14 @@ export function openSingleton(kind: "portforwards" | "settings") {
   const existing = tabs.find((t) => t.kind === kind);
   if (existing) activate(existing.id);
   else open({ kind });
+}
+
+/** Open (or focus) the settings page of one cluster. */
+export function openClusterSettings(context: string) {
+  const { tabs, activate, open } = useTabs.getState();
+  const existing = tabs.find((t) => t.kind === "cluster-settings" && t.context === context);
+  if (existing) activate(existing.id);
+  else open({ kind: "cluster-settings", context });
 }
 
 export function tabContext(tab: Tab): string | null {

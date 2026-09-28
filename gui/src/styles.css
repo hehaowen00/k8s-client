@@ -1230,6 +1230,17 @@ mark {
 .folder-row:last-child {
   border-bottom: 0;
 }
+.cluster-settings-name {
+  flex: 1;
+  min-width: 0;
+}
+.settings-inner h1 .muted {
+  font-weight: normal;
+  margin-left: 8px;
+}
+.settings-section .link + .link {
+  margin-left: 10px;
+}
 .folder-row > .mono {
   flex: 1;
   min-width: 0;

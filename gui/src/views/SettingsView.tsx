@@ -6,11 +6,10 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, type FolderInfo } from "../api";
 import { EMPTY_CLUSTER, NO_MCP, bumpContexts, useContexts, useSettings, type ClusterSettings, type McpAccess, type Settings } from "../settings";
 import { useDiscovery } from "../hooks";
-import { contextColor, contextLabel, useTabs, type Tab } from "../store";
+import { contextColor, contextLabel, openClusterSettings, type Tab } from "../store";
 import { alertDialog, toast } from "../components/Dialogs";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useExtensions } from "../extensions";
-import { Select } from "../components/Select";
 import { Checkbox } from "../components/Checkbox";
 
 const COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
@@ -66,28 +65,19 @@ function CommitInput({ value, onCommit, placeholder, className }: { value: strin
   );
 }
 
-export function SettingsView({ tab }: { tab: Extract<Tab, { kind: "settings" }> }) {
+/** App-wide settings. Per-cluster options live on each cluster's own page (ClusterSettingsView). */
+export function SettingsView() {
   const settings = useSettings((s) => s.settings);
   const save = useSettings((s) => s.save);
   const contexts = useContexts();
-  const [cluster, setCluster] = useState<string | null>(tab.context ?? null);
   const [folders, setFolders] = useState<FolderInfo[]>([]);
 
   useEffect(() => {
     api.listKubeconfigFolders().then(setFolders, () => {});
   }, [settings?.kubeconfigFolders]);
-  useEffect(() => {
-    if (tab.context) setCluster(tab.context);
-  }, [tab.context]);
-  useEffect(() => {
-    if (!cluster && contexts.data?.length) setCluster(contexts.data[0].name);
-  }, [cluster, contexts.data]);
 
   if (!settings) return <div className="empty">Loading settings…</div>;
   const set = (patch: Partial<Settings>) => save({ ...settings, ...patch }).catch((e) => toast(String(e), "bad"));
-  const cs: ClusterSettings = (cluster && settings.clusters[cluster]) || EMPTY_CLUSTER;
-  const setCluster_ = (patch: Partial<ClusterSettings>) =>
-    cluster && set({ clusters: { ...settings.clusters, [cluster]: { ...cs, ...patch } } });
 
   return (
     <div className="settings-view">
@@ -148,102 +138,29 @@ export function SettingsView({ tab }: { tab: Extract<Tab, { kind: "settings" }> 
                 }
               }}
             >
-              + Add folder…
+              + Add folder
             </button>
           </Field>
         </section>
 
         <section className="settings-section">
           <h2>Clusters</h2>
-          <Field label="Cluster">
-            <Select className="select wide-select" value={cluster ?? ""} onChange={(e) => setCluster(e.target.value)}>
+          <Field label="Per-cluster settings" hint="Name, colour, icon, namespaces, proxy and MCP access">
+            <div className="folders">
               {contexts.data?.map((c) => (
-                <option key={c.name} value={c.name}>
-                  {contextLabel(c.name)}
-                  {contextLabel(c.name) !== c.name ? ` — ${c.name}` : ""}
-                </option>
-              ))}
-            </Select>
-          </Field>
-          {cluster && (
-            <>
-              <Field label="Display name" hint="Shown on tabs, cards and the hotbar">
-                <CommitInput value={cs.displayName ?? ""} placeholder={cluster} onCommit={(v) => setCluster_({ displayName: v.trim() || null })} />
-              </Field>
-              <Field label="Colour">
-                <div className="swatches">
-                  {COLORS.map((c) => (
-                    <button
-                      key={c}
-                      className={`swatch ${cs.color === c ? "active" : ""}`}
-                      style={{ background: c }}
-                      aria-label={`Colour ${c}`}
-                      onClick={() => setCluster_({ color: c })}
-                    />
-                  ))}
-                  <button className="btn btn-xs btn-ghost" onClick={() => setCluster_({ color: null })}>
-                    Auto
+                <div key={c.name} className="folder-row">
+                  <span className="tab-dot" style={{ background: contextColor(c.name) }} />
+                  <span className="cluster-settings-name" title={c.name}>
+                    {contextLabel(c.name)}
+                    {contextLabel(c.name) !== c.name && <span className="muted small"> — {c.name}</span>}
+                  </span>
+                  <button className="btn btn-xs btn-ghost" onClick={() => openClusterSettings(c.name)}>
+                    Settings
                   </button>
-                  <span className="swatch preview" style={{ background: contextColor(cluster) }} title="Current" />
                 </div>
-              </Field>
-              <Field label="Icon" hint="Image shown instead of the colour">
-                <div className="swatches">
-                  <label className="btn btn-xs">
-                    Choose image…
-                    <input
-                      type="file"
-                      accept="image/*"
-                      hidden
-                      onChange={async (e) => {
-                        const input = e.currentTarget;
-                        const file = input.files?.[0];
-                        if (!file) return;
-                        try {
-                          setCluster_({ icon: await iconDataUrl(file) });
-                        } catch (err) {
-                          console.error("icon decode failed", file.type, err);
-                          alertDialog("Couldn't read that image", `${file.name} (${file.type || "unknown type"}, ${file.size} bytes)\n\n${err}`);
-                        } finally {
-                          input.value = "";
-                        }
-                      }}
-                    />
-                  </label>
-                  {cs.icon && (
-                    <button className="btn btn-xs btn-ghost" onClick={() => setCluster_({ icon: null })}>
-                      Remove
-                    </button>
-                  )}
-                </div>
-              </Field>
-              <Field label="Pin to hotbar">
-                <Checkbox checked={cs.pinned} onChange={(e) => setCluster_({ pinned: e.target.checked })}>Pinned</Checkbox>
-              </Field>
-              <Field label="Default namespace" hint="Selected when opening this cluster; * = all namespaces">
-                <CommitInput value={cs.defaultNamespace ?? ""} placeholder="none (pick when opening)" onCommit={(v) => setCluster_({ defaultNamespace: v.trim() || null })} />
-              </Field>
-              <Field label="Accessible namespaces" hint="Comma-separated; for users who can't list namespaces">
-                <CommitInput
-                  className="wide-input"
-                  value={cs.accessibleNamespaces.join(", ")}
-                  placeholder="e.g. team-a, team-a-staging"
-                  onCommit={(v) =>
-                    setCluster_({
-                      accessibleNamespaces: v
-                        .split(/[,\s]+/)
-                        .map((x) => x.trim())
-                        .filter(Boolean),
-                    })
-                  }
-                />
-              </Field>
-              <Field label="Proxy" hint="http://, https:// or socks5:// — used for the API server, Helm and terminals">
-                <CommitInput className="wide-input" value={cs.proxyUrl ?? ""} placeholder="none" onCommit={(v) => setCluster_({ proxyUrl: v.trim() || null })} />
-              </Field>
-              <McpClusterAccess cluster={cluster} value={cs.mcp ?? NO_MCP} onChange={(mcp) => setCluster_({ mcp })} />
-            </>
-          )}
+              ))}
+            </div>
+          </Field>
         </section>
 
         <McpSection settings={settings} set={set} />
@@ -286,8 +203,109 @@ export function SettingsView({ tab }: { tab: Extract<Tab, { kind: "settings" }> 
   );
 }
 
-export function openClusterSettings(context: string) {
-  useTabs.getState().open({ kind: "settings", context });
+/** Settings for one cluster: how it's shown, how it's reached, and what MCP clients may read. */
+export function ClusterSettingsView({ tab }: { tab: Extract<Tab, { kind: "cluster-settings" }> }) {
+  const settings = useSettings((s) => s.settings);
+  const save = useSettings((s) => s.save);
+  const cluster = tab.context;
+
+  if (!settings) return <div className="empty">Loading settings…</div>;
+  const set = (patch: Partial<Settings>) => save({ ...settings, ...patch }).catch((e) => toast(String(e), "bad"));
+  const cs: ClusterSettings = settings.clusters[cluster] || EMPTY_CLUSTER;
+  const setCluster_ = (patch: Partial<ClusterSettings>) => set({ clusters: { ...settings.clusters, [cluster]: { ...cs, ...patch } } });
+
+  return (
+    <div className="settings-view">
+      <div className="settings-inner">
+        <h1>
+          {contextLabel(cluster)}
+          {contextLabel(cluster) !== cluster && <span className="muted small"> {cluster}</span>}
+        </h1>
+        <section className="settings-section">
+          <h2>General</h2>
+          <Field label="Display name" hint="Shown on tabs, cards and the hotbar">
+            <CommitInput value={cs.displayName ?? ""} placeholder={cluster} onCommit={(v) => setCluster_({ displayName: v.trim() || null })} />
+          </Field>
+          <Field label="Colour">
+            <div className="swatches">
+              {COLORS.map((c) => (
+                <button
+                  key={c}
+                  className={`swatch ${cs.color === c ? "active" : ""}`}
+                  style={{ background: c }}
+                  aria-label={`Colour ${c}`}
+                  onClick={() => setCluster_({ color: c })}
+                />
+              ))}
+              <button className="btn btn-xs btn-ghost" onClick={() => setCluster_({ color: null })}>
+                Auto
+              </button>
+              <span className="swatch preview" style={{ background: contextColor(cluster) }} title="Current" />
+            </div>
+          </Field>
+          <Field label="Icon" hint="Image shown instead of the colour">
+            <div className="swatches">
+              <label className="btn btn-xs">
+                Choose image
+                <input
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={async (e) => {
+                    const input = e.currentTarget;
+                    const file = input.files?.[0];
+                    if (!file) return;
+                    try {
+                      setCluster_({ icon: await iconDataUrl(file) });
+                    } catch (err) {
+                      console.error("icon decode failed", file.type, err);
+                      alertDialog("Couldn't read that image", `${file.name} (${file.type || "unknown type"}, ${file.size} bytes)\n\n${err}`);
+                    } finally {
+                      input.value = "";
+                    }
+                  }}
+                />
+              </label>
+              {cs.icon && (
+                <button className="btn btn-xs btn-ghost" onClick={() => setCluster_({ icon: null })}>
+                  Remove
+                </button>
+              )}
+            </div>
+          </Field>
+          <Field label="Pin to hotbar">
+            <Checkbox checked={cs.pinned} onChange={(e) => setCluster_({ pinned: e.target.checked })}>Pinned</Checkbox>
+          </Field>
+          <Field label="Default namespace" hint="Selected when opening this cluster; * = all namespaces">
+            <CommitInput value={cs.defaultNamespace ?? ""} placeholder="none (pick when opening)" onCommit={(v) => setCluster_({ defaultNamespace: v.trim() || null })} />
+          </Field>
+          <Field label="Accessible namespaces" hint="Comma-separated; for users who can't list namespaces">
+            <CommitInput
+              className="wide-input"
+              value={cs.accessibleNamespaces.join(", ")}
+              placeholder="e.g. team-a, team-a-staging"
+              onCommit={(v) =>
+                setCluster_({
+                  accessibleNamespaces: v
+                    .split(/[,\s]+/)
+                    .map((x) => x.trim())
+                    .filter(Boolean),
+                })
+              }
+            />
+          </Field>
+          <Field label="Proxy" hint="http://, https:// or socks5:// — used for the API server, Helm and terminals">
+            <CommitInput className="wide-input" value={cs.proxyUrl ?? ""} placeholder="none" onCommit={(v) => setCluster_({ proxyUrl: v.trim() || null })} />
+          </Field>
+        </section>
+
+        <section className="settings-section">
+          <h2>MCP access</h2>
+          <McpClusterAccess cluster={cluster} value={cs.mcp ?? NO_MCP} onChange={(mcp) => setCluster_({ mcp })} />
+        </section>
+      </div>
+    </div>
+  );
 }
 
 function UpdatesSection({ settings, set }: { settings: Settings; set: (p: Partial<Settings>) => void }) {
@@ -450,7 +468,7 @@ function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value
       {value.enabled && (
         <>
           <Field label="Resource types" hint={`${value.resources.length} shared, as kubectl-style tables`}>
-            <input className="input wide-input" placeholder="Filter…" value={filter} onChange={(e) => setFilter(e.target.value)} />
+            <input className="input wide-input" placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
             <div className="folders mcp-resources">
               {discovery.loading && <div className="folder-row muted small">Loading resource types…</div>}
               {discovery.error && <div className="folder-row small">{discovery.error}</div>}
@@ -549,8 +567,18 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
           }}
         />
       </Field>
-      <Field label="Shared clusters" hint="Choose per cluster under Clusters → MCP access">
-        <span className="small">{shared.length ? shared.map(([id]) => contextLabel(id)).join(", ") : <span className="muted">None yet</span>}</span>
+      <Field label="Shared clusters" hint="Choose in each cluster's settings, under MCP access">
+        <span className="small">
+          {shared.length ? (
+            shared.map(([id]) => (
+              <button key={id} className="link" onClick={() => openClusterSettings(id)}>
+                {contextLabel(id)}
+              </button>
+            ))
+          ) : (
+            <span className="muted">None yet</span>
+          )}
+        </span>
       </Field>
       {settings.mcpEnabled && token && (
         <Field label="Connect a client" hint="Anyone with the token can read what you share">
