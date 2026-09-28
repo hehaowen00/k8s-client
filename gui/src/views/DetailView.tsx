@@ -14,6 +14,7 @@ import {
   setSuspend,
   triggerCronJob, restartTarget, scaleTarget, type Target } from "../actions";
 import { useAsync, useDiscovery } from "../hooks";
+import { inBackground, useOpenObject } from "../clusterNav";
 import { openSession, useTabs, type Tab } from "../store";
 import { decodeBase64, formatAge, parseQuantity, selectorString, statusTone, useNow } from "../util";
 import { MetricsPanel } from "../components/MetricsPanel";
@@ -335,10 +336,12 @@ function Overview({ obj, target, active }: { obj: KubeObject; target: Target; ac
   const discovery = useDiscovery(target.context);
   const conditions: KubeObject[] | undefined = obj.status?.conditions;
 
-  const openOwner = (o: KubeObject) => {
+  const openObject = useOpenObject();
+  const openOwner = (o: KubeObject, background: boolean) => {
     const group = String(o.apiVersion).includes("/") ? o.apiVersion.split("/")[0] : "";
     const res = discovery.data?.find((r) => r.group === group && r.kind === o.kind);
-    if (res) openDetail({ context: target.context, resource: res, namespace: target.namespace, name: o.name });
+    // Owners are in the same namespace, or cluster-scoped (e.g. a Node owning a mirror pod).
+    if (res) openObject({ context: target.context, resource: res, namespace: res.namespaced ? target.namespace : null, name: o.name }, background);
     else toast(`Unknown resource ${o.apiVersion}/${o.kind}`, "bad");
   };
 
@@ -371,7 +374,7 @@ function Overview({ obj, target, active }: { obj: KubeObject; target: Target; ac
           <KV label="Controlled By">
             {md.ownerReferences?.length
               ? md.ownerReferences.map((o: KubeObject) => (
-                  <button key={o.uid} className="link" onClick={() => openOwner(o)}>
+                  <button key={o.uid} className="link" onClick={(e) => openOwner(o, inBackground(e))}>
                     {o.kind}/{o.name}
                   </button>
                 ))

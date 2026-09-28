@@ -3,7 +3,7 @@ import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api, type HelmChart, type HelmRelease, type HelmReleaseDetails } from "../api";
-import { openDetail } from "../actions";
+import { inBackground, useOpenObject } from "../clusterNav";
 import { useDiscovery, useNamespaces } from "../hooks";
 import { useTabs } from "../store";
 import { formatAge, nsForApi, nsSelection, statusTone, useNow } from "../util";
@@ -323,6 +323,7 @@ function manifestObjects(manifest: string): { apiVersion: string; kind: string; 
 
 function ReleaseOverview({ context, release, details, now }: { context: string; release: HelmRelease; details: HelmReleaseDetails; now: number }) {
   const discovery = useDiscovery(context);
+  const openObject = useOpenObject();
   const [chart, version] = splitChart(release.chart);
   const objects = useMemo(() => manifestObjects(details.manifest), [details.manifest]);
   return (
@@ -367,8 +368,11 @@ function ReleaseOverview({ context, release, details, now }: { context: string; 
                       {res ? (
                         <button
                           className="link"
-                          onClick={() =>
-                            openDetail({ context, resource: res, namespace: res.namespaced ? o.namespace ?? release.namespace : null, name: o.name })
+                          onClick={(e) =>
+                            openObject(
+                              { context, resource: res, namespace: res.namespaced ? o.namespace ?? release.namespace : null, name: o.name },
+                              inBackground(e),
+                            )
                           }
                         >
                           {o.name}
