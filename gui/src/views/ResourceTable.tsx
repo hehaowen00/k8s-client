@@ -274,13 +274,27 @@ export function ResourceTable(props: Props) {
     else return;
     e.preventDefault();
     onSelect(rows[next]);
+    scrollToRow(next);
+  };
+  const scrollToRow = (idx: number) => {
     const el = scrollRef.current;
     if (el) {
-      const y = next * ROW_HEIGHT;
+      const y = idx * ROW_HEIGHT;
       if (y < el.scrollTop) el.scrollTop = y;
       else if (y + ROW_HEIGHT * 2 > el.scrollTop + el.clientHeight) el.scrollTop = y + ROW_HEIGHT * 2 - el.clientHeight;
     }
   };
+  // A selection made from outside (e.g. a pod opened from a deployment) may be off screen, or
+  // not loaded yet: bring it into view once its row exists.
+  const revealed = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selectedUid || revealed.current === selectedUid) return;
+    const idx = visibleRows.rows.findIndex((r) => r.uid === selectedUid);
+    if (idx < 0) return;
+    revealed.current = selectedUid;
+    scrollToRow(idx);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedUid, visibleRows.rows]);
 
   // Multi-select for bulk actions (restart where supported, delete everywhere it's allowed).
   const restartable = isRestartable(resource);

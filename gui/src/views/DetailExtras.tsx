@@ -8,6 +8,7 @@ import { useDiscovery } from "../hooks";
 import { useTabs } from "../store";
 import { ALL_NAMESPACES, formatAge, selectorString, statusTone, useNow } from "../util";
 import { ResourceTable } from "./ResourceTable";
+import { useClusterNav } from "../clusterNav";
 import { toast } from "../components/Dialogs";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -647,6 +648,8 @@ export function RelatedPods({
 }) {
   const [count, setCount] = useState<number | null>(null);
   const onCount = useCallback((n: number) => setCount(n), []);
+  // In a cluster view's drawer, opening a pod shows it in that view's Pods list.
+  const showInList = useClusterNav();
   return (
     <Section title={`Pods${count !== null ? ` (${count})` : ""}`}>
       <div className="related-table" style={{ height: Math.min(360, 32 + Math.max(1, count ?? 3) * 30 + 6) }}>
@@ -663,7 +666,9 @@ export function RelatedPods({
           fieldSelector={fieldSelector}
           onSelect={() => {}}
           onOpen={(row, background) =>
-            openDetail({ context: target.context, resource: POD_RESOURCE, namespace: row.namespace ?? null, name: row.name }, { background })
+            showInList && !background
+              ? showInList(POD_RESOURCE, row)
+              : openDetail({ context: target.context, resource: POD_RESOURCE, namespace: row.namespace ?? null, name: row.name }, { background })
           }
           onCount={onCount}
         />
