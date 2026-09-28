@@ -8,6 +8,8 @@ type Dialog =
       message: string;
       danger?: boolean;
       confirmLabel?: string;
+      /** OK-only; no Cancel button. */
+      alert?: boolean;
       resolve: (ok: boolean) => void;
     }
   | {
@@ -54,6 +56,12 @@ export function promptDialog(opts: {
     useDialogs.setState({
       dialog: { type: "prompt", initial: "", ...opts, resolve },
     }),
+  );
+}
+
+export function alertDialog(title: string, message: string): Promise<void> {
+  return new Promise((resolve) =>
+    useDialogs.setState({ dialog: { type: "confirm", title, message, alert: true, confirmLabel: "OK", resolve: () => resolve() } }),
   );
 }
 
@@ -135,9 +143,11 @@ export function DialogHost() {
               />
             )}
             <div className="modal-actions">
-              <button type="button" className="btn" onClick={() => finish(false)}>
-                Cancel
-              </button>
+              {!(dialog.type === "confirm" && dialog.alert) && (
+                <button type="button" className="btn" onClick={() => finish(false)}>
+                  Cancel
+                </button>
+              )}
               <button
                 ref={okRef}
                 type="submit"

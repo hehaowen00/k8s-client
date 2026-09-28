@@ -659,7 +659,7 @@ export function RelatedPods({
   const openObject = useOpenObject();
   return (
     <Section title={`Pods${count !== null ? ` (${count})` : ""}`}>
-      <div className="related-table" style={{ height: Math.min(360, 32 + Math.max(1, count ?? 3) * 30 + 6) }}>
+      <div className="related-table" style={{ height: Math.min(360, 32 + Math.max(1, count ?? 3) * 30 + 12) }}>
         <ResourceTable
           context={target.context}
           resource={POD_RESOURCE}

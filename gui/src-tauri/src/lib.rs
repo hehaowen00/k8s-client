@@ -3,6 +3,7 @@ mod helm;
 mod kube_ops;
 mod kubectl;
 mod kubeconfigs;
+mod mcp;
 mod metrics;
 mod multi_logs;
 mod nodeops;
@@ -23,6 +24,7 @@ pub fn run() {
         .manage(updates::PendingUpdate::default())
         .manage(state::AppState::default())
         .manage(portforward::Forwards::default())
+        .manage(mcp::McpServer::default())
         .manage(settings::KubeconfigWatcher(std::sync::Mutex::new(None)))
         .setup(|app| {
             use tauri::Manager;
@@ -31,6 +33,7 @@ pub fn run() {
             *st.settings.lock().unwrap() = settings::load();
             *st.managed_dir.lock().unwrap() = settings::managed_dir().ok();
             settings::restart_watcher(app.handle());
+            mcp::restart(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -94,6 +97,10 @@ pub fn run() {
             streams::session_resize,
             streams::session_close,
             streams::pty_start,
+            mcp::mcp_status,
+            mcp::mcp_access_log,
+            mcp::mcp_clear_log,
+            mcp::mcp_regenerate_token,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
