@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { TabBar } from "./components/TabBar";
 import { ContextMenuHost } from "./components/ContextMenu";
 import { DialogHost } from "./components/Dialogs";
@@ -51,6 +52,12 @@ export default function App() {
   useSettingsBootstrap();
   useEffect(() => {
     loadExtensions();
+  }, []);
+  useEffect(() => {
+    const un = listen("open-settings", () => openSingleton("settings"));
+    return () => {
+      un.then((f) => f());
+    };
   }, []);
   // Re-render on settings changes (display names / colours are read from the store).
   useSettings((s) => s.settings);

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useSettings, NO_CLUSTERS } from "../settings";
 import { usePref } from "../hooks";
-import { contextColor, contextIcon, contextLabel, openCluster, openClusterSettings, openSingleton, tabContext, useTabs } from "../store";
+import { contextColor, contextIcon, contextLabel, openCluster, openClusterSettings, tabContext, useTabs } from "../store";
 import { openContextMenu } from "./ContextMenu";
 
 /** Pinned clusters rail (Lens "hotbar"). Hidden until something is pinned. */
@@ -74,10 +74,6 @@ export function Hotbar() {
           </button>
         );
       })}
-      <div className="spacer" />
-      <button className="hotbar-tool" title="Settings (Ctrl+,)" onClick={() => openSingleton("settings")}>
-        ⚙
-      </button>
     </nav>
   );
 }

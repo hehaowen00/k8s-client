@@ -54,7 +54,12 @@ export type Tab = TabBase &
     | { kind: "apply"; context: string | null; namespace: string | null }
     | { kind: "portforwards" }
     | { kind: "settings" }
-    | { kind: "cluster-settings"; context: string }
+    | {
+        kind: "cluster-settings";
+        context: string;
+        /** Opened in place of a New Tab page, which it can go back to. */
+        fromHome?: boolean;
+      }
   );
 
 export type NewTab = Tab extends infer T ? (T extends Tab ? Omit<T, "id"> : never) : never;
@@ -265,12 +270,18 @@ export function openSingleton(kind: "portforwards" | "settings") {
   else open({ kind });
 }
 
-/** Open (or focus) the settings page of one cluster. */
-export function openClusterSettings(context: string) {
-  const { tabs, activate, open } = useTabs.getState();
+/** Open (or focus) the settings page of one cluster. `replace` turns that New Tab page into it instead. */
+export function openClusterSettings(context: string, opts?: { replace?: string }) {
+  const { tabs, activate, open, update } = useTabs.getState();
+  if (opts?.replace) return update(opts.replace, { kind: "cluster-settings", context, fromHome: true });
   const existing = tabs.find((t) => t.kind === "cluster-settings" && t.context === context);
   if (existing) activate(existing.id);
   else open({ kind: "cluster-settings", context });
+}
+
+/** Turn a tab back into a New Tab page (a fresh object so no fields of the old kind linger). */
+export function backToHome(id: string) {
+  useTabs.setState((s) => ({ tabs: s.tabs.map((t) => (t.id === id ? { id, kind: "home" } : t)) }));
 }
 
 export function tabContext(tab: Tab): string | null {

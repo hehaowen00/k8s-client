@@ -1856,16 +1856,6 @@ mark {
 .hotbar-item.drop-target {
   box-shadow: 0 0 0 2px var(--accent);
 }
-.hotbar-tool {
-  border: 0;
-  background: none;
-  color: var(--text-dim);
-  font-size: 18px;
-  cursor: pointer;
-}
-.hotbar-tool:hover {
-  color: var(--text);
-}
 .settings-view {
   flex: 1;
   overflow: auto;
@@ -1875,6 +1865,9 @@ mark {
   margin: 0 auto;
   padding: 32px 24px 60px;
   user-select: text;
+}
+.settings-back {
+  margin: -12px 0 10px -8px;
 }
 .settings-inner h1 {
   font-size: 22px;
@@ -2457,9 +2450,6 @@ button.ns-option {
 .checkbox-box svg {
   width: 12px;
   height: 12px;
-}
-.hotbar-tool {
-  font-size: 21px;
 }
 .dock-actions .btn,
 .btn-icon {

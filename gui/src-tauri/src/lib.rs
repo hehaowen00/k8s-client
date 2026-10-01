@@ -13,6 +13,24 @@ mod state;
 mod streams;
 mod updates;
 
+/// The default macOS menu with a Settings item (Cmd+,) under the app menu.
+#[cfg(target_os = "macos")]
+fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
+    use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+    let menu = Menu::default(app)?;
+    if let Some(MenuItemKind::Submenu(app_submenu)) = menu.items()?.into_iter().next() {
+        // After "About" and its separator.
+        app_submenu.insert_items(
+            &[
+                &MenuItem::with_id(app, "settings", "Settings", true, Some("CmdOrCtrl+,"))?,
+                &PredefinedMenuItem::separator(app)?,
+            ],
+            2,
+        )?;
+    }
+    Ok(menu)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let _ = rustls::crypto::ring::default_provider().install_default();
@@ -34,7 +52,15 @@ pub fn run() {
             *st.managed_dir.lock().unwrap() = settings::managed_dir().ok();
             settings::restart_watcher(app.handle());
             mcp::restart(app.handle());
+            #[cfg(target_os = "macos")]
+            app.set_menu(app_menu(app.handle())?)?;
             Ok(())
+        })
+        .on_menu_event(|app, event| {
+            use tauri::Emitter;
+            if event.id() == "settings" {
+                let _ = app.emit("open-settings", ());
+            }
         })
         .invoke_handler(tauri::generate_handler![
             kubeconfigs::list_contexts,
