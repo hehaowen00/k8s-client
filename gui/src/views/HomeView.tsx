@@ -7,6 +7,7 @@ import { useAsync } from "../hooks";
 import { confirmDialog, toast } from "../components/Dialogs";
 import { openContextMenu } from "../components/ContextMenu";
 import { addClusterDialog } from "../components/AddClusterDialog";
+import { pickClusterIcon } from "../clusterIcon";
 import { bumpContexts, useContexts, useSettings, NO_CLUSTERS } from "../settings";
 import { contextColor, contextIcon, contextDetail, contextLabel, openCluster, openClusterSettings, openSingleton, useTabs, type Tab } from "../store";
 
@@ -100,7 +101,9 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
                   clusters[c.name]?.pinned
                     ? { label: "Unpin from Hotbar", onClick: () => updateCluster(c.name, { pinned: false }) }
                     : { label: "Pin to Hotbar", onClick: () => updateCluster(c.name, { pinned: true }) },
-                  { label: "Cluster Settings", onClick: () => openClusterSettings(c.name) },
+                  { label: "Change Icon", onClick: () => pickClusterIcon(c.name) },
+                  ...(clusters[c.name]?.icon ? [{ label: "Remove Icon", onClick: () => updateCluster(c.name, { icon: null }) }] : []),
+                  { label: "Cluster Settings", onClick: () => openClusterSettings(c.name, { replace: tab.id }) },
                   ...(c.source && folders.data?.some((f) => f.managed && c.source!.startsWith(f.path))
                     ? [
                         { separator: true, label: "" },

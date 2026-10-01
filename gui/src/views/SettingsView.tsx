@@ -6,11 +6,12 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, type FolderInfo } from "../api";
 import { EMPTY_CLUSTER, NO_MCP, bumpContexts, useContexts, useSettings, type ClusterSettings, type McpAccess, type Settings } from "../settings";
 import { useDiscovery } from "../hooks";
-import { contextColor, contextLabel, openClusterSettings, type Tab } from "../store";
+import { backToHome, contextColor, contextLabel, openClusterSettings, type Tab } from "../store";
 import { alertDialog, toast } from "../components/Dialogs";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useExtensions } from "../extensions";
 import { Checkbox } from "../components/Checkbox";
+import { iconDataUrl } from "../clusterIcon";
 
 const COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
 
@@ -27,29 +28,6 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 /** Text input that commits on blur / Enter instead of every keystroke. */
-/** Downscale an image file to a 64px square (cover-cropped) PNG data URL, so settings stay small. */
-async function iconDataUrl(file: File): Promise<string> {
-  // <img> decodes anything the webview can display (SVG, ICO, HEIC); createImageBitmap rejects several of those.
-  const url = URL.createObjectURL(file);
-  try {
-    const img = new Image();
-    img.src = url;
-    await img.decode();
-    const size = 64;
-    const iw = img.naturalWidth || size;
-    const ih = img.naturalHeight || size;
-    const canvas = document.createElement("canvas");
-    canvas.width = canvas.height = size;
-    const scale = Math.max(size / iw, size / ih);
-    const w = iw * scale;
-    const h = ih * scale;
-    canvas.getContext("2d")!.drawImage(img, (size - w) / 2, (size - h) / 2, w, h);
-    return canvas.toDataURL("image/png");
-  } finally {
-    URL.revokeObjectURL(url);
-  }
-}
-
 function CommitInput({ value, onCommit, placeholder, className }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string }) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
@@ -217,6 +195,11 @@ export function ClusterSettingsView({ tab }: { tab: Extract<Tab, { kind: "cluste
   return (
     <div className="settings-view">
       <div className="settings-inner">
+        {tab.fromHome && (
+          <button className="btn btn-xs btn-ghost settings-back" onClick={() => backToHome(tab.id)}>
+            ← New Tab
+          </button>
+        )}
         <h1>
           {contextLabel(cluster)}
           {contextLabel(cluster) !== cluster && <span className="muted small"> {cluster}</span>}
