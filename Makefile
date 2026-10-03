@@ -6,6 +6,8 @@
 #   make build       release binary only (no packaging)
 #   make package     OS installers/bundles in gui/src-tauri/target/release/bundle
 #   make test        type-check, Rust tests and lints
+#   make prune       trim build files older than KEEP_DAYS days (default 14)
+#   make clean       delete all build output
 #
 # Install locations
 #   macOS    /Applications/Kube Portal.app            (APP_DIR=... to change)
@@ -52,7 +54,7 @@ DESKTOP_DIR := $(DATADIR)/applications
 ICON_DIR    := $(DATADIR)/icons/hicolor
 DESKTOP     := $(DESKTOP_DIR)/$(APP_ID).desktop
 
-.PHONY: help deps dev build package test roadmap install uninstall clean \
+.PHONY: help deps dev build package test roadmap install uninstall clean prune \
         install-macos install-linux install-windows \
         uninstall-macos uninstall-linux uninstall-windows
 
@@ -159,3 +161,10 @@ uninstall-windows:
 clean:
 	cd $(TAURI) && cargo clean
 	rm -rf $(GUI)/dist
+
+# target/ keeps every dependency version ever built and grows without bound. cargo-reclaim
+# (cargo install cargo-reclaim) trims stale dependency builds and incremental caches older than
+# KEEP_DAYS days, keeping the current build, final binaries and anything unrecognised.
+KEEP_DAYS ?= 14
+prune:
+	cargo reclaim $(TAURI) --all --yes --keep-days $(KEEP_DAYS)
