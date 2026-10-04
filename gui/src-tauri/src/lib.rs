@@ -35,6 +35,7 @@ fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wr
 pub fn run() {
     let _ = rustls::crypto::ring::default_provider().install_default();
     tauri::Builder::default()
+        .plugin(tauri_plugin_window_state::Builder::new().build())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -46,6 +47,19 @@ pub fn run() {
         .manage(settings::KubeconfigWatcher(std::sync::Mutex::new(None)))
         .setup(|app| {
             use tauri::Manager;
+            use tauri_plugin_window_state::AppHandleExt;
+            // Open maximized on first launch; afterwards the window-state plugin restores
+            // the last size, position and maximized state.
+            let has_saved_state = app
+                .path()
+                .app_config_dir()
+                .map(|d| d.join(app.handle().filename()).exists())
+                .unwrap_or(false);
+            if !has_saved_state {
+                if let Some(w) = app.get_webview_window("main") {
+                    let _ = w.maximize();
+                }
+            }
             let st = app.state::<state::AppState>();
             settings::migrate_legacy(app.handle());
             *st.settings.lock().unwrap() = settings::load();
