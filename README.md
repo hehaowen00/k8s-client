@@ -80,7 +80,6 @@ Requires Rust, Node + pnpm, and the [Tauri system dependencies](https://tauri.ap
 Helm features need the `helm` CLI on PATH (or a path in Settings).
 
 ```sh
-cd gui
 pnpm install
 pnpm tauri dev      # run in development
 pnpm tauri build    # produce a release bundle
