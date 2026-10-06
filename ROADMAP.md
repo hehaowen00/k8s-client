@@ -3,7 +3,7 @@
 Tracks which features Kube Portal has, compared with Lens.
 
 **Status markers:** `[x]` done · `[~]` partial (see note) · `[ ]` not started.
-To update, change the marker and, for `[~]`, say what's missing. Run `pnpm roadmap` in `gui/` to see progress
+To update, change the marker and, for `[~]`, say what's missing. Run `pnpm roadmap` to see progress
 (`pnpm roadmap --todo` lists what's left).
 
 ## Clusters & kubeconfig

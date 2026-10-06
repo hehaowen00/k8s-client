@@ -4,7 +4,7 @@
 #   make uninstall   remove what `make install` put in place
 #   make dev         run in development (hot reload)
 #   make build       release binary only (no packaging)
-#   make package     OS installers/bundles in gui/src-tauri/target/release/bundle
+#   make package     OS installers/bundles in src-tauri/target/release/bundle
 #   make test        type-check, Rust tests and lints
 #   make prune       trim build files older than KEEP_DAYS days (default 14)
 #   make clean       delete all build output
@@ -23,8 +23,7 @@
 APP      := Kube Portal
 BIN      := kube-portal
 APP_ID   := dev.k8side.app
-GUI      := gui
-TAURI    := $(GUI)/src-tauri
+TAURI    := src-tauri
 RELEASE  := $(TAURI)/target/release
 BUNDLE   := $(RELEASE)/bundle
 PNPM     ?= pnpm
@@ -63,16 +62,16 @@ help:
 	@echo "Detected platform: $(PLATFORM)"
 
 deps:
-	cd $(GUI) && $(PNPM) install
+	$(PNPM) install
 
 dev: deps
-	cd $(GUI) && $(PNPM) tauri dev
+	$(PNPM) tauri dev
 
 build: deps
-	cd $(GUI) && $(PNPM) tauri build --no-bundle
+	$(PNPM) tauri build --no-bundle
 
 package: deps
-	cd $(GUI) && $(PNPM) tauri build
+	$(PNPM) tauri build
 ifeq ($(PLATFORM),macos)
 	@for dmg in "$(BUNDLE)"/dmg/*.dmg; do \
 	  mnt=$$(hdiutil attach -nobrowse -readonly "$$dmg" | tail -1 | cut -f3) && \
@@ -83,11 +82,11 @@ ifeq ($(PLATFORM),macos)
 endif
 
 test: deps
-	cd $(GUI) && npx tsc --noEmit
+	npx tsc --noEmit
 	cd $(TAURI) && cargo test --lib && cargo clippy -- -D warnings
 
 roadmap:
-	cd $(GUI) && $(PNPM) -s roadmap --todo
+	$(PNPM) -s roadmap --todo
 
 install: install-$(PLATFORM)
 
@@ -96,7 +95,7 @@ uninstall: uninstall-$(PLATFORM)
 # ---------------------------------------------------------------- macOS
 
 install-macos: deps
-	cd $(GUI) && $(PNPM) tauri build --bundles app
+	$(PNPM) tauri build --bundles app
 	@test -d "$(BUNDLE)/macos/$(APP).app" || { echo "error: $(BUNDLE)/macos/$(APP).app was not built"; exit 1; }
 	codesign --verify --deep --strict "$(BUNDLE)/macos/$(APP).app"
 	@if pgrep -xq "$(BIN)"; then echo "Quitting running $(APP)…"; osascript -e 'quit app "$(APP)"' || true; sleep 1; fi
@@ -144,7 +143,7 @@ uninstall-linux:
 # ---------------------------------------------------------------- Windows (Git Bash / MSYS make)
 
 install-windows: deps
-	cd $(GUI) && $(PNPM) tauri build --bundles nsis
+	$(PNPM) tauri build --bundles nsis
 	@installer=$$(ls -t "$(BUNDLE)"/nsis/*-setup.exe 2>/dev/null | head -n1); \
 	 test -n "$$installer" || { echo "error: no NSIS installer in $(BUNDLE)/nsis"; exit 1; }; \
 	 echo "Running $$installer /S"; \
@@ -160,7 +159,7 @@ uninstall-windows:
 
 clean:
 	cd $(TAURI) && cargo clean
-	rm -rf $(GUI)/dist
+	rm -rf dist
 
 # target/ keeps every dependency version ever built and grows without bound. cargo-reclaim
 # (cargo install cargo-reclaim) trims stale dependency builds and incremental caches older than
