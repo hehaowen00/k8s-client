@@ -137,11 +137,9 @@ impl AppState {
         let yaml = serde_yaml::to_string(&kc).map_err(err)?;
         let dir = app.path().app_cache_dir().map_err(err)?.join("kubeconfigs");
         std::fs::create_dir_all(&dir).map_err(err)?;
-        let safe: String = context
-            .chars()
-            .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
-            .collect();
-        let path = dir.join(format!("{safe}.yaml"));
+        // Hashed so that context names differing only in punctuation can't share a file.
+        use sha2::{Digest, Sha256};
+        let path = dir.join(format!("{}.yaml", hex::encode(&Sha256::digest(context.as_bytes())[..16])));
         crate::settings::write_private(&path, yaml.as_bytes()).map_err(err)?;
         Ok(path)
     }

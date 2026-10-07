@@ -341,9 +341,9 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
               </div>
             </>
           ) : tab.page === "releases" ? (
-            <HelmReleases context={tab.context} namespace={tab.namespace} active={active} onNamespace={(ns) => update(tab.id, { namespace: ns })} />
+            <HelmReleases key={tab.context} context={tab.context} namespace={tab.namespace} active={active} onNamespace={(ns) => update(tab.id, { namespace: ns })} />
           ) : tab.page === "charts" ? (
-            <HelmCharts context={tab.context} active={active} />
+            <HelmCharts key={tab.context} context={tab.context} active={active} />
           ) : tab.page?.startsWith("ext:") ? (
             <ExtPageView
               page={extPages.find((p) => `ext:${p.ext}:${p.title}` === tab.page)}
