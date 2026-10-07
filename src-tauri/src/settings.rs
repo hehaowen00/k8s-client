@@ -105,10 +105,29 @@ pub fn config_dir() -> Result<PathBuf> {
     Ok(base.join("kube-portal"))
 }
 
+/// The folder and database hold the MCP token and pasted credentials, so only the owner may read them.
+#[cfg(unix)]
+fn restrict(path: &Path, mode: u32) {
+    use std::os::unix::fs::PermissionsExt;
+    if let Ok(meta) = std::fs::metadata(path) {
+        if meta.permissions().mode() & 0o777 != mode {
+            let _ = std::fs::set_permissions(path, std::fs::Permissions::from_mode(mode));
+        }
+    }
+}
+
 fn open_db() -> Result<rusqlite::Connection> {
     let dir = config_dir()?;
     std::fs::create_dir_all(&dir).map_err(err)?;
-    let db = rusqlite::Connection::open(dir.join("settings.db")).map_err(err)?;
+    let path = dir.join("settings.db");
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(&path);
+        restrict(&dir, 0o700);
+        restrict(&path, 0o600);
+    }
+    let db = rusqlite::Connection::open(&path).map_err(err)?;
     db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)", [])
         .map_err(err)?;
     Ok(db)

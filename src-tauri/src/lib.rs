@@ -142,6 +142,15 @@ pub fn run() {
             mcp::mcp_clear_log,
             mcp::mcp_regenerate_token,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                use tauri::Manager;
+                let st = app.state::<state::AppState>();
+                tauri::async_runtime::block_on(async {
+                    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), st.delete_node_shells()).await;
+                });
+            }
+        });
 }

@@ -36,7 +36,8 @@ fn pod_key(p: &Pod) -> String {
 }
 
 /// Cordon the node, then evict everything except DaemonSet and mirror (static) pods,
-/// like `kubectl drain --ignore-daemonsets --delete-emptydir-data`.
+/// like `kubectl drain --ignore-daemonsets --delete-emptydir-data`. Pods without a controller
+/// are refused, as kubectl does without `--force`: evicting them would delete them for good.
 #[tauri::command]
 pub async fn drain_node(state: State<'_, AppState>, context: String, node: String) -> Result<DrainResult> {
     let client = state.client(&context).await?;
@@ -50,34 +51,61 @@ pub async fn drain_node(state: State<'_, AppState>, context: String, node: Strin
         .await
         .map_err(kerr)?;
     let mut result = DrainResult { evicted: vec![], skipped: vec![], failed: vec![], pending: vec![] };
-    let mut evicted_pods = Vec::new();
+    let mut to_evict = Vec::new();
     for p in pods.items {
         let key = pod_key(&p);
         let phase = p.status.as_ref().and_then(|s| s.phase.as_deref()).unwrap_or_default();
-        let is_ds = p.metadata.owner_references.iter().flatten().any(|o| o.kind == "DaemonSet");
+        let owners = p.metadata.owner_references.as_deref().unwrap_or_default();
+        let is_ds = owners.iter().any(|o| o.kind == "DaemonSet");
         let is_mirror = p.metadata.annotations.as_ref().is_some_and(|a| a.contains_key("kubernetes.io/config.mirror"));
         if is_ds || is_mirror || phase == "Succeeded" || phase == "Failed" {
             result.skipped.push(key);
-            continue;
-        }
-        let ns = p.metadata.namespace.clone().unwrap_or_default();
-        let name = p.metadata.name.clone().unwrap_or_default();
-        match Api::<Pod>::namespaced(client.clone(), &ns).evict(&name, &EvictParams::default()).await {
-            Ok(_) => {
-                result.evicted.push(key);
-                evicted_pods.push((ns, name));
-            }
-            Err(e) => result.failed.push(format!("{key}: {}", kerr(e))),
+        } else if !owners.iter().any(|o| o.controller == Some(true)) {
+            result.failed.push(format!("{key}: not managed by a controller; delete it yourself if it can go"));
+        } else {
+            to_evict.push(p);
         }
     }
 
-    // Wait (bounded) for evicted pods to go away.
+    // Evictions blocked by a PodDisruptionBudget (429) are retried until the deadline.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    let mut evicted_pods = Vec::new();
+    loop {
+        let mut blocked = Vec::new();
+        for p in to_evict {
+            let key = pod_key(&p);
+            let ns = p.metadata.namespace.clone().unwrap_or_default();
+            let name = p.metadata.name.clone().unwrap_or_default();
+            match Api::<Pod>::namespaced(client.clone(), &ns).evict(&name, &EvictParams::default()).await {
+                Ok(_) => {
+                    result.evicted.push(key);
+                    evicted_pods.push((ns, name, p.metadata.uid.clone()));
+                }
+                Err(kube::Error::Api(e)) if e.code == 429 => blocked.push((p, e.message)),
+                Err(kube::Error::Api(e)) if e.code == 404 => result.evicted.push(key),
+                Err(e) => result.failed.push(format!("{key}: {}", kerr(e))),
+            }
+        }
+        if blocked.is_empty() {
+            break;
+        }
+        if tokio::time::Instant::now() >= deadline {
+            result.failed.extend(blocked.iter().map(|(p, msg)| format!("{}: {msg}", pod_key(p))));
+            break;
+        }
+        to_evict = blocked.into_iter().map(|(p, _)| p).collect();
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    }
+
+    // Wait (bounded) for evicted pods to go away. StatefulSet pods come back under the same name, so compare UIDs.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(90);
     loop {
         let mut remaining = Vec::new();
-        for (ns, name) in &evicted_pods {
-            if let Ok(Some(_)) = Api::<Pod>::namespaced(client.clone(), ns).get_opt(name).await {
-                remaining.push(format!("{ns}/{name}"));
+        for (ns, name, uid) in &evicted_pods {
+            if let Ok(Some(p)) = Api::<Pod>::namespaced(client.clone(), ns).get_opt(name).await {
+                if p.metadata.uid == *uid {
+                    remaining.push(format!("{ns}/{name}"));
+                }
             }
         }
         if remaining.is_empty() || tokio::time::Instant::now() >= deadline {
@@ -102,11 +130,17 @@ pub struct NodeShellPod {
 pub async fn node_shell_create(state: State<'_, AppState>, context: String, node: String) -> Result<NodeShellPod> {
     let client = state.client(&context).await?;
     let api: Api<Pod> = Api::namespaced(client, NODE_SHELL_NAMESPACE);
+    let node_hash = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(node.as_bytes())[..8]);
     let name = format!("node-shell-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
     let pod: Pod = serde_json::from_value(json!({
         "apiVersion": "v1",
         "kind": "Pod",
-        "metadata": { "name": name, "labels": { NODE_SHELL_LABEL: node } },
+        "metadata": {
+            "name": name,
+            // Label values are capped at 63 characters, so the node name goes in an annotation.
+            "labels": { NODE_SHELL_LABEL: node_hash },
+            "annotations": { NODE_SHELL_LABEL: node }
+        },
         "spec": {
             "nodeName": node,
             "restartPolicy": "Never",
@@ -129,11 +163,17 @@ pub async fn node_shell_create(state: State<'_, AppState>, context: String, node
     }))
     .map_err(|e| e.to_string())?;
     api.create(&PostParams::default(), &pod).await.map_err(kerr)?;
+    state.track_node_shell(&context, &name);
 
-    // Wait for it to run.
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
     loop {
-        let p = api.get(&name).await.map_err(kerr)?;
+        let p = match api.get(&name).await {
+            Ok(p) => p,
+            Err(e) => {
+                let _ = api.delete(&name, &DeleteParams::default()).await;
+                return Err(kerr(e));
+            }
+        };
         let status = p.status.unwrap_or_default();
         match status.phase.as_deref() {
             Some("Running") => break,

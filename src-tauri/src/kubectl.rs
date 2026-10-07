@@ -3,6 +3,7 @@
 //! published SHA-256, and put it first on PATH in that cluster's terminals.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
@@ -48,7 +49,13 @@ pub async fn ensure(app: &AppHandle, version: &str, progress: impl Fn(&str)) -> 
     let (os, arch, file) = platform().ok_or("unsupported platform for kubectl download")?;
     let url = format!("https://dl.k8s.io/release/{version}/bin/{os}/{arch}/{file}");
     progress(&format!("Downloading kubectl {version} to match the cluster…"));
-    let http = reqwest::Client::builder().build().map_err(err)?;
+    // A stalled download would otherwise leave the terminal waiting forever.
+    let http = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .read_timeout(Duration::from_secs(30))
+        .timeout(Duration::from_secs(600))
+        .build()
+        .map_err(err)?;
     let expected = http
         .get(format!("{url}.sha256"))
         .send()
@@ -62,10 +69,27 @@ pub async fn ensure(app: &AppHandle, version: &str, progress: impl Fn(&str)) -> 
 
     let dir = path.parent().ok_or("bad kubectl path")?;
     tokio::fs::create_dir_all(dir).await.map_err(err)?;
-    let tmp = dir.join(format!("{file}.download"));
-    let resp = http.get(&url).send().await.and_then(|r| r.error_for_status()).map_err(|e| format!("kubectl download: {e}"))?;
+    // Unique per download: two terminals fetching the same version mustn't share a partial file.
+    let tmp = dir.join(format!("{file}.{}.download", uuid::Uuid::new_v4().simple()));
+    let result = download(&http, &url, &tmp, &expected, &progress).await.and_then(|_| make_executable(&tmp));
+    if let Err(e) = result {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        return Err(e);
+    }
+    if let Err(e) = tokio::fs::rename(&tmp, &path).await {
+        let _ = tokio::fs::remove_file(&tmp).await;
+        // Another download of the same version got there first.
+        if !path.exists() {
+            return Err(err(e));
+        }
+    }
+    Ok(path)
+}
+
+async fn download(http: &reqwest::Client, url: &str, tmp: &Path, expected: &str, progress: &impl Fn(&str)) -> Result<()> {
+    let resp = http.get(url).send().await.and_then(|r| r.error_for_status()).map_err(|e| format!("kubectl download: {e}"))?;
     let total = resp.content_length();
-    let mut out = tokio::fs::File::create(&tmp).await.map_err(err)?;
+    let mut out = tokio::fs::File::create(tmp).await.map_err(err)?;
     let mut hasher = Sha256::new();
     let mut stream = resp.bytes_stream();
     let mut got: u64 = 0;
@@ -87,12 +111,9 @@ pub async fn ensure(app: &AppHandle, version: &str, progress: impl Fn(&str)) -> 
     drop(out);
     let actual = hex::encode(hasher.finalize());
     if actual != expected {
-        let _ = tokio::fs::remove_file(&tmp).await;
         return Err(format!("kubectl checksum mismatch (expected {expected}, got {actual})"));
     }
-    make_executable(&tmp)?;
-    tokio::fs::rename(&tmp, &path).await.map_err(err)?;
-    Ok(path)
+    Ok(())
 }
 
 fn make_executable(p: &Path) -> Result<()> {

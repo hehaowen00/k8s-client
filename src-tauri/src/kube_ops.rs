@@ -91,7 +91,7 @@ pub(crate) async fn discover_resources(state: &AppState, context: &str, refresh:
             return Ok(d);
         }
     }
-    let client = state.client(&context).await?;
+    let client = state.client(context).await?;
     let discovery = match Discovery::new(client.clone()).run_aggregated().await {
         Ok(d) => d,
         // Older servers lack aggregated discovery; connection errors shouldn't retry.
@@ -282,12 +282,15 @@ pub(crate) async fn list_table(
     }
 }
 
+const WATCH_BACKOFF_MIN: std::time::Duration = std::time::Duration::from_millis(500);
+const WATCH_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_secs(30);
+
 enum WatchOutcome {
     Cancelled,
     /// Watch ended normally (server timeout); resume from resourceVersion.
     Resume,
-    /// resourceVersion too old or stream error; relist.
-    Relist,
+    /// resourceVersion too old or stream error; relist. Carries an error worth showing (e.g. watch forbidden).
+    Relist(Option<String>),
 }
 
 async fn watch_table(
@@ -308,13 +311,14 @@ async fn watch_table(
         .body(vec![])
     {
         Ok(r) => r,
-        Err(_) => return WatchOutcome::Relist,
+        Err(e) => return WatchOutcome::Relist(Some(e.to_string())),
     };
     let stream = tokio::select! {
         _ = token.cancelled() => return WatchOutcome::Cancelled,
         s = client.request_stream(req) => match s {
             Ok(s) => s,
-            Err(_) => return WatchOutcome::Relist,
+            Err(kube::Error::Api(e)) if e.code == 410 => return WatchOutcome::Relist(None),
+            Err(e) => return WatchOutcome::Relist(Some(format!("watch failed: {}", kerr(e)))),
         },
     };
     let mut lines = stream.lines();
@@ -325,7 +329,7 @@ async fn watch_table(
         };
         let line = match line {
             None => return WatchOutcome::Resume,
-            Some(Err(_)) => return WatchOutcome::Relist,
+            Some(Err(_)) => return WatchOutcome::Relist(None),
             Some(Ok(l)) => l,
         };
         let Ok(ev) = serde_json::from_str::<Value>(&line) else {
@@ -334,7 +338,8 @@ async fn watch_table(
         let obj = &ev["object"];
         let ty = ev["type"].as_str().unwrap_or_default();
         if ty == "ERROR" {
-            return WatchOutcome::Relist;
+            let msg = (obj["code"].as_i64() != Some(410)).then(|| format!("watch failed: {}", obj["message"].as_str().unwrap_or("unknown error")));
+            return WatchOutcome::Relist(msg);
         }
         let rows = if is_table(obj) {
             parse_table_rows(obj)
@@ -385,6 +390,7 @@ pub async fn watch_resources(
 
     tokio::spawn(async move {
         let mut backoff = 1u64;
+        let mut watch_backoff = WATCH_BACKOFF_MIN;
         'outer: loop {
             let (columns, rows, mut rv, table_mode) = match list_table(&client, &url, &resource).await {
                 Ok(v) => v,
@@ -405,16 +411,33 @@ pub async fn watch_resources(
                 break;
             }
             loop {
-                match watch_table(&client, &url, &resource, table_mode, &mut rv, &channel, &token).await {
+                let (started, start_rv) = (std::time::Instant::now(), rv.clone());
+                let outcome = watch_table(&client, &url, &resource, table_mode, &mut rv, &channel, &token).await;
+                // A watch that delivered events or ran a while is healthy; one that keeps ending at once backs off.
+                if rv != start_rv || started.elapsed() > std::time::Duration::from_secs(60) {
+                    watch_backoff = WATCH_BACKOFF_MIN;
+                }
+                let relist = match outcome {
                     WatchOutcome::Cancelled => break 'outer,
-                    WatchOutcome::Resume => continue,
-                    WatchOutcome::Relist => {
-                        tokio::select! {
-                            _ = token.cancelled() => break 'outer,
-                            _ = tokio::time::sleep(std::time::Duration::from_millis(500)) => {}
+                    WatchOutcome::Resume => false,
+                    WatchOutcome::Relist(msg) => {
+                        if let Some(message) = msg {
+                            if channel.send(TableEvent::Error { message }).is_err() {
+                                break 'outer;
+                            }
                         }
-                        continue 'outer;
+                        true
                     }
+                };
+                if relist || watch_backoff > WATCH_BACKOFF_MIN || started.elapsed() < std::time::Duration::from_secs(1) {
+                    tokio::select! {
+                        _ = token.cancelled() => break 'outer,
+                        _ = tokio::time::sleep(watch_backoff) => {}
+                    }
+                    watch_backoff = (watch_backoff * 2).min(WATCH_BACKOFF_MAX);
+                }
+                if relist {
+                    continue 'outer;
                 }
             }
         }

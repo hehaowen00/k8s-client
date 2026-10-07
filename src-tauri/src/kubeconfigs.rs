@@ -5,6 +5,7 @@
 //! another source already uses it, in which case the file name is appended.
 
 use std::collections::{HashMap, HashSet};
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use kube::config::Kubeconfig;
@@ -27,6 +28,9 @@ pub struct ContextEntry {
     user: Option<String>,
     namespace: Option<String>,
     current: bool,
+    /// Hash of the context's cluster and user sections, so editing the server or credentials
+    /// counts as a change and the cached client is rebuilt.
+    fingerprint: u64,
 }
 
 #[derive(Serialize)]
@@ -114,8 +118,10 @@ fn looks_like_kubeconfig(path: &Path) -> bool {
             }
             let le = bytes[0] == 0xFF;
             let units: Vec<u16> = rest
-                .chunks_exact(2)
-                .map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) })
+                .as_chunks::<2>()
+                .0
+                .iter()
+                .map(|c| if le { u16::from_le_bytes(*c) } else { u16::from_be_bytes(*c) })
                 .collect();
             match String::from_utf16(&units) {
                 Ok(t) => t,
@@ -135,7 +141,12 @@ fn entries_from(kc: &Kubeconfig, file: Option<&Path>) -> Vec<ContextEntry> {
         .iter()
         .map(|c| {
             let ctx = c.context.clone().unwrap_or_default();
+            let mut h = std::collections::hash_map::DefaultHasher::new();
+            let cluster = kc.clusters.iter().find(|n| n.name == ctx.cluster);
+            let user = kc.auth_infos.iter().find(|n| Some(&n.name) == ctx.user.as_ref());
+            serde_json::to_string(&(cluster, user)).unwrap_or_default().hash(&mut h);
             ContextEntry {
+                fingerprint: h.finish(),
                 id: c.name.clone(),
                 name: c.name.clone(),
                 file: file.map(Path::to_path_buf),
