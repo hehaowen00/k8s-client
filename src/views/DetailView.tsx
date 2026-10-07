@@ -255,12 +255,26 @@ function Tone({ value }: { value?: string }) {
   return <span className={t ? `tone-${t}` : ""}>{value}</span>;
 }
 
-function Annotations({ map }: { map?: Record<string, string> }) {
+// kubectl apply stores the whole manifest here, so on a Secret it holds the secret values.
+const LAST_APPLIED = "kubectl.kubernetes.io/last-applied-configuration";
+
+function Annotations({ map, secret }: { map?: Record<string, string>; secret?: boolean }) {
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [revealed, setRevealed] = useState(false);
   if (!map || !Object.keys(map).length) return null;
   return (
     <div className="annotations">
       {Object.entries(map).map(([k, v]) => {
+        if (secret && k === LAST_APPLIED && !revealed) {
+          return (
+            <div key={k} className="annotation">
+              <span className="ann-key">{k}</span>
+              <span className="ann-val">
+                •••••••• <button className="btn btn-xs" onClick={() => setRevealed(true)}>Reveal</button>
+              </span>
+            </div>
+          );
+        }
         const long = v.length > 120;
         return (
           <div key={k} className="annotation">
@@ -369,7 +383,7 @@ function Overview({ obj, target, active }: { obj: KubeObject; target: Target; ac
             {md.labels && Object.keys(md.labels).length ? <Chips map={md.labels} /> : undefined}
           </KV>
           <KV label="Annotations">
-            {md.annotations && Object.keys(md.annotations).length ? <Annotations map={md.annotations} /> : undefined}
+            {md.annotations && Object.keys(md.annotations).length ? <Annotations map={md.annotations} secret={target.resource.kind === "Secret"} /> : undefined}
           </KV>
           <KV label="Controlled By">
             {md.ownerReferences?.length

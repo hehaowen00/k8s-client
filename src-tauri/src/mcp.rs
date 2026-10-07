@@ -299,6 +299,34 @@ fn need<'a>(a: &'a Value, k: &str) -> std::result::Result<&'a str, Fail> {
     arg(a, k).ok_or_else(|| Fail::Error(format!("missing argument: {k}")))
 }
 
+/// Names and namespaces are pasted into API paths, so anything that could change the path is refused.
+fn check_segment(k: &str, v: &str) -> std::result::Result<(), Fail> {
+    if v == "." || v == ".." || v.chars().any(|c| matches!(c, '/' | '?' | '#' | '%' | '\\') || c.is_control()) {
+        return Err(Fail::Denied(format!("invalid {k}: \"{v}\"")));
+    }
+    Ok(())
+}
+
+fn need_segment<'a>(a: &'a Value, k: &str) -> std::result::Result<&'a str, Fail> {
+    let v = need(a, k)?;
+    check_segment(k, v)?;
+    Ok(v)
+}
+
+/// Hides Secret values, including the copy kubectl keeps in the last-applied annotation.
+fn redact_secret(v: &mut Value) {
+    for key in ["data", "stringData"] {
+        if let Some(m) = v.get_mut(key).and_then(Value::as_object_mut) {
+            m.values_mut().for_each(|x| *x = json!("<redacted>"));
+        }
+    }
+    if let Some(ann) = v.pointer_mut("/metadata/annotations").and_then(Value::as_object_mut) {
+        if let Some(x) = ann.get_mut("kubectl.kubernetes.io/last-applied-configuration") {
+            *x = json!("<redacted>");
+        }
+    }
+}
+
 /// Resource type id as users write it in settings: `pods`, `deployments.apps`.
 pub fn resource_id(r: &ResourceInfo) -> String {
     if r.group.is_empty() {
@@ -318,6 +346,7 @@ fn access(state: &AppState, cluster: &str) -> std::result::Result<McpAccess, Fai
 }
 
 fn check_ns(a: &McpAccess, ns: &str) -> std::result::Result<(), Fail> {
+    check_segment("namespace", ns)?;
     if a.namespaces.is_empty() || a.namespaces.iter().any(|n| n == ns) {
         Ok(())
     } else {
@@ -413,15 +442,11 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                 None
             };
             let client = state.client(cluster).await?;
-            let obj = res.api(client, ns).get(need(a, "name")?).await.map_err(kerr)?;
+            let obj = res.api(client, ns).get(need_segment(a, "name")?).await.map_err(kerr)?;
             let mut v = serde_json::to_value(obj).map_err(err)?;
             kube_ops::strip_noise(&mut v);
-            if res.kind == "Secret" {
-                for key in ["data", "stringData"] {
-                    if let Some(m) = v.get_mut(key).and_then(Value::as_object_mut) {
-                        m.values_mut().for_each(|x| *x = json!("<redacted>"));
-                    }
-                }
+            if res.kind == "Secret" || v["kind"] == "Secret" {
+                redact_secret(&mut v);
             }
             let yaml = serde_yaml::to_string(&v).map_err(err)?;
             let detail = format!("{} bytes", yaml.len());
@@ -442,7 +467,7 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                 previous: a["previous"].as_bool().unwrap_or(false),
                 ..Default::default()
             };
-            let text = Api::<Pod>::namespaced(client, ns).logs(need(a, "pod")?, &lp).await.map_err(kerr)?;
+            let text = Api::<Pod>::namespaced(client, ns).logs(need_segment(a, "pod")?, &lp).await.map_err(kerr)?;
             let detail = format!("{} line(s)", text.lines().count());
             Ok((text, detail))
         }
@@ -546,9 +571,26 @@ mod tests {
         assert_eq!(target_namespaces(&some, None).ok().unwrap().len(), 2);
         assert!(matches!(target_namespaces(&some, Some("x")), Err(Fail::Denied(_))));
         assert!(check_ns(&some, "b").is_ok());
+        for bad in ["kube-system/secrets/x", "a?b", "a#b", "a%2Fb", "..", "a\\b"] {
+            assert!(matches!(check_ns(&all, bad), Err(Fail::Denied(_))), "{bad}");
+        }
+        assert!(check_segment("name", "system:node-proxier").is_ok());
         let core = ResourceInfo { group: "".into(), version: "v1".into(), kind: "Pod".into(), plural: "pods".into(), namespaced: true, verbs: vec![] };
         let apps = ResourceInfo { group: "apps".into(), plural: "deployments".into(), ..core.clone() };
         assert_eq!(resource_id(&core), "pods");
         assert_eq!(resource_id(&apps), "deployments.apps");
+    }
+
+    #[test]
+    fn secret_redaction() {
+        let mut v = json!({
+            "kind": "Secret",
+            "data": {"pw": "aHVudGVyMg=="},
+            "stringData": {"pw": "hunter2"},
+            "metadata": {"annotations": {"kubectl.kubernetes.io/last-applied-configuration": "{\"data\":{\"pw\":\"aHVudGVyMg==\"}}", "keep": "x"}}
+        });
+        redact_secret(&mut v);
+        assert!(!v.to_string().contains("aHVudGVyMg") && !v.to_string().contains("hunter2"));
+        assert_eq!(v["metadata"]["annotations"]["keep"], "x");
     }
 }
