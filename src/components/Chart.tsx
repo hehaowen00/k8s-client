@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { Point } from "../metrics";
+import { MAX_BARS, type Point } from "../metrics";
 
 export interface RefLine {
   value: number;
@@ -44,9 +44,56 @@ function niceByteTicks(max: number, count = 4): number[] {
   return ticks;
 }
 
-const hhmm = (t: number) => new Date(t * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const TIME_STEPS = [10, 15, 30, 60, 120, 300, 600, 900, 1800, 3600, 7200, 10800, 21600];
 
-export function LineChart({ title, points, format, refs = [], height = 150, emptyText, bytes, minMax = 0 }: Props & { bytes?: boolean }) {
+function clock(t: number, seconds: boolean) {
+  return new Date(t * 1000).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: seconds ? "2-digit" : undefined,
+    hourCycle: "h23",
+  });
+}
+
+interface Bin {
+  start: number;
+  end: number;
+  value: number;
+}
+
+/** Average samples into fixed-width bins ending at `end`, so each bar covers an equal slice of the span. */
+function binPoints(points: Point[], end: number, span: number, step: number): { bins: (Bin | null)[]; width: number } {
+  const n = Math.max(1, Math.min(MAX_BARS, Math.round(span / Math.max(step, 1))));
+  const width = span / n;
+  const t0 = end - span;
+  const sums = new Float64Array(n);
+  const counts = new Uint32Array(n);
+  for (const [t, v] of points) {
+    const i = Math.ceil((t - t0) / width) - 1;
+    if (i < 0 || i >= n) continue;
+    sums[i] += v;
+    counts[i]++;
+  }
+  const bins: (Bin | null)[] = [];
+  for (let i = 0; i < n; i++) {
+    bins.push(counts[i] ? { start: t0 + i * width, end: t0 + (i + 1) * width, value: sums[i] / counts[i] } : null);
+  }
+  return { bins, width };
+}
+
+export function BarChart({
+  title,
+  points,
+  format,
+  refs = [],
+  height = 150,
+  emptyText,
+  bytes,
+  minMax = 0,
+  span,
+  step,
+  end,
+}: Props & { bytes?: boolean; span: number; step: number; end: number }) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(400);
   const [hover, setHover] = useState<number | null>(null);
@@ -59,49 +106,40 @@ export function LineChart({ title, points, format, refs = [], height = 150, empt
     return () => ro.disconnect();
   }, []);
 
+  const t1 = end || Date.now() / 1000;
+  const { bins, width: binW } = useMemo(() => binPoints(points, t1, span, step), [points, t1, span, step]);
+
   const geo = useMemo(() => {
     const innerW = Math.max(10, width - M.left - M.right);
     const innerH = height - M.top - M.bottom;
-    const t0 = points.length ? points[0][0] : Date.now() / 1000 - 3600;
-    const t1 = points.length ? Math.max(points[points.length - 1][0], t0 + 60) : Date.now() / 1000;
-    const vmax = Math.max(minMax, ...points.map((p) => p[1]), ...refs.map((r) => r.value));
+    const t0 = t1 - span;
+    let vmax = minMax;
+    for (const b of bins) if (b && b.value > vmax) vmax = b.value;
+    for (const r of refs) if (r.value > vmax) vmax = r.value;
     const ticks = bytes ? niceByteTicks(vmax) : niceTicks(vmax);
     const ymax = ticks[ticks.length - 1] || 1;
-    const x = (t: number) => M.left + ((t - t0) / (t1 - t0)) * innerW;
+    const x = (t: number) => M.left + ((t - t0) / span) * innerW;
     const y = (v: number) => M.top + innerH - (v / ymax) * innerH;
-    // Time ticks on round 10/15/30-minute boundaries depending on span.
-    const span = t1 - t0;
-    const tstep = span > 4 * 3600 ? 3600 : span > 90 * 60 ? 1800 : span > 30 * 60 ? 900 : span > 10 * 60 ? 300 : 60;
+    const maxLabels = Math.max(2, Math.floor(innerW / 64));
+    const tstep = TIME_STEPS.find((s) => span / s <= Math.min(6, maxLabels)) ?? TIME_STEPS[TIME_STEPS.length - 1];
     const xticks: number[] = [];
     for (let t = Math.ceil(t0 / tstep) * tstep; t <= t1; t += tstep) xticks.push(t);
-    return { innerW, innerH, x, y, ticks, xticks, t0, t1 };
-  }, [points, refs, width, height, bytes, minMax]);
+    const barW = innerW / bins.length;
+    const gap = barW > 4 ? Math.min(2, barW * 0.2) : 0;
+    return { innerW, innerH, x, y, ticks, xticks, tstep, barW, gap };
+  }, [bins, refs, width, height, bytes, minMax, span, t1]);
 
-  const line = points.map((p, i) => `${i ? "L" : "M"}${geo.x(p[0]).toFixed(1)},${geo.y(p[1]).toFixed(1)}`).join("");
-  const area = points.length
-    ? `${line}L${geo.x(points[points.length - 1][0]).toFixed(1)},${geo.y(0)}L${geo.x(points[0][0]).toFixed(1)},${geo.y(0)}Z`
-    : "";
   const latest = points.length ? points[points.length - 1][1] : null;
-  const hp = hover !== null ? points[hover] : null;
+  const hb = hover !== null ? bins[hover] : null;
 
   const onMove = (e: React.PointerEvent<SVGSVGElement>) => {
-    if (!points.length) return;
     const rect = e.currentTarget.getBoundingClientRect();
-    const px = e.clientX - rect.left;
-    // Snap to the nearest sample (points are time-ordered).
-    let best = 0;
-    let bestD = Infinity;
-    for (let i = 0; i < points.length; i++) {
-      const d = Math.abs(geo.x(points[i][0]) - px);
-      if (d < bestD) {
-        bestD = d;
-        best = i;
-      }
-    }
-    setHover(best);
+    const i = Math.floor((e.clientX - rect.left - M.left) / geo.barW);
+    setHover(i >= 0 && i < bins.length && bins[i] ? i : null);
   };
 
-  const tipLeft = hp ? Math.min(Math.max(geo.x(hp[0]) + 10, M.left), width - 150) : 0;
+  const tipLeft = hb ? Math.min(Math.max(geo.x(hb.end) + 6, M.left), width - 170) : 0;
+  const showSeconds = geo.tstep < 60 || binW < 60;
 
   return (
     <div className="chart" ref={wrapRef}>
@@ -128,9 +166,23 @@ export function LineChart({ title, points, format, refs = [], height = 150, empt
           ))}
           {geo.xticks.map((t) => (
             <text key={t} className="chart-tick" x={geo.x(t)} y={height - 6} textAnchor="middle">
-              {hhmm(t)}
+              {clock(t, geo.tstep < 60)}
             </text>
           ))}
+          {bins.map((b, i) => {
+            if (!b) return null;
+            const top = geo.y(b.value);
+            return (
+              <rect
+                key={i}
+                className={i === hover ? "chart-bar active" : "chart-bar"}
+                x={M.left + i * geo.barW + geo.gap / 2}
+                y={top}
+                width={Math.max(1, geo.barW - geo.gap)}
+                height={Math.max(0, geo.y(0) - top)}
+              />
+            );
+          })}
           {refs.map((r) => (
             <g key={r.label}>
               <line className="chart-ref" x1={M.left} x2={M.left + geo.innerW} y1={geo.y(r.value)} y2={geo.y(r.value)} />
@@ -139,36 +191,16 @@ export function LineChart({ title, points, format, refs = [], height = 150, empt
               </text>
             </g>
           ))}
-          {points.length > 0 && (
-            <>
-              <path className="chart-area" d={area} />
-              <path className="chart-line" d={line} />
-            </>
-          )}
-          {points.length > 0 && !hp && (
-            // End marker: the latest value (also makes a single sample visible).
-            <circle
-              className="chart-dot"
-              cx={geo.x(points[points.length - 1][0])}
-              cy={geo.y(points[points.length - 1][1])}
-              r={4}
-            />
-          )}
-          {hp && (
-            <>
-              <line className="chart-crosshair" x1={geo.x(hp[0])} x2={geo.x(hp[0])} y1={M.top} y2={M.top + geo.innerH} />
-              <circle className="chart-dot" cx={geo.x(hp[0])} cy={geo.y(hp[1])} r={4} />
-            </>
-          )}
-          {/* Full-plot hit target so the crosshair tracks anywhere, not just on the line. */}
           <rect x={M.left} y={M.top} width={geo.innerW} height={geo.innerH} fill="transparent" />
         </svg>
         {!points.length && <div className="chart-empty">{emptyText ?? "No data"}</div>}
-        {hp && (
+        {hb && (
           <div className="chart-tip" style={{ left: tipLeft, top: 6 }}>
-            <div className="muted small">{new Date(hp[0] * 1000).toLocaleTimeString()}</div>
+            <div className="muted small">
+              {clock(hb.start, showSeconds)} – {clock(hb.end, showSeconds)}
+            </div>
             <div>
-              <span className="chart-swatch" /> {title} <strong>{format(hp[1])}</strong>
+              <span className="chart-swatch" /> {title} <strong>{format(hb.value)}</strong>
             </div>
           </div>
         )}

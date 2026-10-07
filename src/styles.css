@@ -1377,16 +1377,19 @@ mark {
   font-size: 10px;
   font-variant-numeric: tabular-nums;
 }
-.chart-line {
-  fill: none;
-  stroke: var(--series-1);
-  stroke-width: 2;
-  stroke-linejoin: round;
-  stroke-linecap: round;
-}
-.chart-area {
+.chart-bar {
   fill: var(--series-1);
-  opacity: 0.1;
+  opacity: 0.85;
+}
+.chart-bar.active {
+  opacity: 1;
+}
+.chart-spans {
+  margin-bottom: 8px;
+}
+.chart-spans button {
+  padding: 3px 10px;
+  font-size: 12px;
 }
 .chart-ref {
   stroke: var(--text-faint);
@@ -1395,15 +1398,6 @@ mark {
 .chart-ref-label {
   fill: var(--text-dim);
   font-size: 10px;
-}
-.chart-crosshair {
-  stroke: var(--text-dim);
-  stroke-width: 1;
-}
-.chart-dot {
-  fill: var(--series-1);
-  stroke: var(--bg);
-  stroke-width: 2;
 }
 .chart-empty {
   position: absolute;
@@ -1426,8 +1420,9 @@ mark {
 }
 .chart-swatch {
   display: inline-block;
-  width: 10px;
-  height: 2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
   background: var(--series-1);
   vertical-align: middle;
   margin-right: 2px;
