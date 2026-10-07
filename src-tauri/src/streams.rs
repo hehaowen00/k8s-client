@@ -210,8 +210,12 @@ pub async fn exec_start(
     let (tx, mut rx) = mpsc::unbounded_channel::<SessionInput>();
     state.register_session(&id, tx);
 
-    // stdin + resize pump
+    // The pump ends when session_close drops the sender; that also tears down the connection,
+    // which closing stdin alone doesn't do (attach without stdin, or commands ignoring EOF).
+    let closed = tokio_util::sync::CancellationToken::new();
+    let close_guard = closed.clone().drop_guard();
     tokio::spawn(async move {
+        let _close_guard = close_guard;
         while let Some(input) = rx.recv().await {
             match input {
                 SessionInput::Data(d) => {
@@ -241,9 +245,13 @@ pub async fn exec_start(
     let status = proc.take_status();
     tokio::spawn(async move {
         let message = match status {
-            Some(s) => s.await.and_then(|st| {
-                (st.status.as_deref() != Some("Success")).then(|| st.message.unwrap_or_default())
-            }),
+            Some(s) => tokio::select! {
+                st = s => st.and_then(|st| (st.status.as_deref() != Some("Success")).then(|| st.message.unwrap_or_default())),
+                _ = closed.cancelled() => {
+                    proc.abort();
+                    None
+                }
+            },
             None => None,
         };
         let _ = proc.join().await;

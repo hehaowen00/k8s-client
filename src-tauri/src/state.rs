@@ -30,6 +30,8 @@ pub struct AppState {
     registry: AsyncMutex<HashMap<String, ContextEntry>>,
     /// Detected Prometheus per context (None inside = looked, not found).
     prometheus: Mutex<HashMap<String, Option<crate::metrics::PrometheusTarget>>>,
+    /// Node-shell pods created this run as (context, pod), deleted on exit in case their tab didn't.
+    node_shells: Mutex<Vec<(String, String)>>,
 }
 
 pub type Result<T> = std::result::Result<T, String>;
@@ -147,7 +149,6 @@ impl AppState {
         Ok(path)
     }
 
-    /// Drop cached client + discovery so the next call re-reads the kubeconfig.
     pub fn cluster_settings(&self, context: &str) -> crate::settings::ClusterSettings {
         self.settings.lock().unwrap().clusters.get(context).cloned().unwrap_or_default()
     }
@@ -160,6 +161,7 @@ impl AppState {
         self.prometheus.lock().unwrap().insert(context.to_string(), t);
     }
 
+    /// Drop cached client + discovery so the next call re-reads the kubeconfig.
     pub async fn reset(&self, context: &str) {
         self.prometheus.lock().unwrap().remove(context);
         self.clients.lock().await.remove(context);
@@ -202,6 +204,22 @@ impl AppState {
 
     pub fn remove_session(&self, id: &str) {
         self.sessions.lock().unwrap().remove(id);
+    }
+
+    pub fn track_node_shell(&self, context: &str, pod: &str) {
+        self.node_shells.lock().unwrap().push((context.to_string(), pod.to_string()));
+    }
+
+    /// Best-effort delete of every node-shell pod from this run (already-deleted ones just 404).
+    pub async fn delete_node_shells(&self) {
+        let pods = std::mem::take(&mut *self.node_shells.lock().unwrap());
+        let deletes = pods.into_iter().map(|(context, pod)| async move {
+            if let Ok(client) = self.client(&context).await {
+                let api: kube::Api<k8s_openapi::api::core::v1::Pod> = kube::Api::namespaced(client, crate::nodeops::NODE_SHELL_NAMESPACE);
+                let _ = api.delete(&pod, &Default::default()).await;
+            }
+        });
+        futures::future::join_all(deletes).await;
     }
 }
 
