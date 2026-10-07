@@ -1,5 +1,6 @@
 import { isMod, platform } from "./keys";
-import { useEffect, useState } from "react";
+import { memo, useEffect, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { listen } from "@tauri-apps/api/event";
 import { TabBar } from "./components/TabBar";
 import { ContextMenuHost } from "./components/ContextMenu";
@@ -22,7 +23,8 @@ import { CommandPaletteHost, openPalette } from "./components/CommandPalette";
 import { usePref } from "./hooks";
 import { loadExtensions } from "./extensions";
 
-function TabContent({ tab, active }: { tab: Tab; active: boolean }) {
+// Memoised so hidden tabs don't re-render when another tab changes (unchanged tabs keep their object identity).
+const TabContent = memo(function TabContent({ tab, active }: { tab: Tab; active: boolean }) {
   switch (tab.kind) {
     case "home":
       return <HomeView tab={tab} />;
@@ -44,10 +46,15 @@ function TabContent({ tab, active }: { tab: Tab; active: boolean }) {
     case "cluster-settings":
       return <ClusterSettingsView tab={tab} />;
   }
-}
+});
 
 export default function App() {
-  const { tabs, activeId, splitId, open, close, cycle, activate, toggleSplit } = useTabs();
+  const { tabs, activeId, splitId } = useTabs(useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, splitId: s.splitId })));
+  const open = useTabs((s) => s.open);
+  const close = useTabs((s) => s.close);
+  const cycle = useTabs((s) => s.cycle);
+  const activate = useTabs((s) => s.activate);
+  const toggleSplit = useTabs((s) => s.toggleSplit);
   const [savedRatio, saveRatio] = usePref("split.ratio", 0.5);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const splitRatio = dragRatio ?? savedRatio;

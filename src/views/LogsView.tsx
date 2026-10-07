@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { api, POD_RESOURCE, type LogSource } from "../api";
 import { useAsync, usePref } from "../hooks";
 import { useTabs, type Tab } from "../store";
@@ -24,6 +24,8 @@ type LogsTab = Extract<Tab, { kind: "logs" }>;
 
 /** A log line; `src` indexes into the source list (-1 for single-container mode). */
 interface Line {
+  /** Arrival number, unique and increasing for the view's lifetime. */
+  n: number;
   src: number;
   /** Text with escape codes removed (used for search / save). */
   text: string;
@@ -31,7 +33,66 @@ interface Line {
   raw?: string;
 }
 
-const toLine = (src: number, s: string): Line => (hasAnsi(s) ? { src, text: stripAnsi(s), raw: s } : { src, text: s });
+const toLine = (src: number, s: string): Line => (hasAnsi(s) ? { n: 0, src, text: stripAnsi(s), raw: s } : { n: 0, src, text: s });
+
+/** First index in `a` whose `n` is >= `n` (`a` is ordered by `n`). */
+function lowerBound<T>(a: T[], n: number, key: (x: T) => number): number {
+  let lo = 0;
+  let hi = a.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (key(a[mid]) < n) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+const lineN = (l: Line) => l.n;
+const num = (x: number) => x;
+
+function highlight(text: string, test: RegExp) {
+  const parts: React.ReactNode[] = [];
+  let i = 0;
+  for (const m of text.matchAll(new RegExp(test.source, "gi"))) {
+    if (!m[0]) continue; // zero-length match (e.g. `a*`): nothing to mark
+    parts.push(text.slice(i, m.index), <mark key={m.index}>{m[0]}</mark>);
+    i = m.index + m[0].length;
+  }
+  parts.push(text.slice(i));
+  return parts;
+}
+
+function renderText(line: Line, test: RegExp | null) {
+  if (test) return highlight(line.text, test);
+  if (line.raw)
+    return parseAnsi(line.raw).map((seg, i) =>
+      seg.style ? (
+        <span key={i} style={seg.style}>
+          {seg.text}
+        </span>
+      ) : (
+        seg.text
+      ),
+    );
+  return line.text;
+}
+
+const LogRow = memo(function LogRow(props: { line: Line; prefix: string; color?: string; current: boolean; test: RegExp | null; top?: number }) {
+  const { line, prefix, color, current, test, top } = props;
+  return (
+    <div
+      data-line={line.n}
+      className={`log-line${top === undefined ? " wrapped" : ""}${current ? " current" : ""}`}
+      style={top === undefined ? undefined : { top, height: LINE_HEIGHT }}
+    >
+      {prefix && (
+        <span className="log-src" style={{ color }}>
+          {prefix}
+        </span>
+      )}
+      {renderText(line, test)}
+    </div>
+  );
+});
 interface Src {
   pod: string;
   container: string;
@@ -45,7 +106,7 @@ function hue(s: string) {
 }
 
 export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: boolean; onUpdate?: (patch: Partial<LogsTab>) => void }) {
-  const { update: updateTab } = useTabs();
+  const updateTab = useTabs((s) => s.update);
   // Dock items persist their choices in the host tab's dock; top-level tabs in the tab itself.
   const update = (_id: string, patch: Partial<LogsTab>) => (onUpdate ? onUpdate(patch) : updateTab(tab.id, patch));
   const workload = tab.workload;
@@ -106,7 +167,6 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   };
   const fitRef = useRef(fitToolbar);
   fitRef.current = fitToolbar;
-  useLayoutEffect(fitToolbar); // toolbar contents change with state (selects, match counter)
   useEffect(() => {
     const ro = new ResizeObserver(() => fitRef.current());
     ro.observe(toolbarRef.current!);
@@ -128,13 +188,22 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
 
   // Total lines ever received (unaffected by trimming), for the "N new lines" count.
   const receivedRef = useRef(0);
+  const rafRef = useRef(0);
+  useEffect(() => () => cancelAnimationFrame(rafRef.current), []);
   const push = (lines: Line[]) => {
-    receivedRef.current += lines.length;
     const buf = linesRef.current;
-    for (const l of lines) buf.push(l);
-    if (buf.length > MAX_LINES) buf.splice(0, buf.length - MAX_LINES);
-    setStatus((s) => (s.state === "connecting" ? { state: "streaming" } : s));
-    setVersion((v) => v + 1);
+    for (const l of lines) {
+      l.n = receivedRef.current++;
+      buf.push(l);
+    }
+    // Trimming shifts the whole array, so let it overshoot a little and trim in bulk.
+    if (buf.length > MAX_LINES * 1.1) buf.splice(0, buf.length - MAX_LINES);
+    if (!rafRef.current)
+      rafRef.current = requestAnimationFrame(() => {
+        rafRef.current = 0;
+        setStatus((s) => (s.state === "connecting" ? { state: "streaming" } : s));
+        setVersion((v) => v + 1);
+      });
   };
   const srcIndex = (podName: string, c: string) => {
     const key = `${podName}/${c}`;
@@ -218,17 +287,32 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
       return { test: null, searchError: (e as Error).message };
     }
   }, [search, regex]);
+  // Filtered lines are kept between batches; only newly arrived lines are tested.
+  const filterRef = useRef<{ buf: Line[]; pod: string; test: RegExp | null; lines: Line[]; next: number } | null>(null);
   const shown = useMemo(() => {
-    let all = linesRef.current;
-    if (podFilter) all = all.filter((l) => l.src >= 0 && srcList[l.src].pod === podFilter);
-    if (test && filterMode) all = all.filter((l) => test.test(l.text));
-    return all;
+    const buf = linesRef.current;
+    const t = filterMode ? test : null;
+    if (!podFilter && !t) return buf;
+    const keep = (l: Line) => (!podFilter || (l.src >= 0 && srcList[l.src].pod === podFilter)) && (!t || t.test(l.text));
+    let f = filterRef.current;
+    if (!f || f.buf !== buf || f.pod !== podFilter || f.test !== t) {
+      f = filterRef.current = { buf, pod: podFilter, test: t, lines: [], next: 0 };
+    }
+    for (let i = lowerBound(buf, f.next, lineN); i < buf.length; i++) if (keep(buf[i])) f.lines.push(buf[i]);
+    if (buf.length) {
+      f.next = buf[buf.length - 1].n + 1;
+      const drop = lowerBound(f.lines, buf[0].n, lineN);
+      if (drop) f.lines.splice(0, drop);
+    }
+    return f.lines;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, test, filterMode, podFilter]);
 
   // Virtual list
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState({ top: 0, height: 600 });
+  const readScroll = (el: HTMLElement) =>
+    setScroll((s) => (s.top === el.scrollTop && s.height === el.clientHeight ? s : { top: el.scrollTop, height: el.clientHeight }));
   const atBottom = useRef(true);
   // Set while scrolled away from the bottom: how many lines had arrived at that point.
   const [awayAt, setAwayAt] = useState<number | null>(null);
@@ -249,7 +333,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     // Resizing the pane (dock opening, window resize) keeps a following view pinned to the bottom.
     const ro = new ResizeObserver(() => {
       if (followRef.current && atBottom.current) el.scrollTop = el.scrollHeight;
-      setScroll({ top: el.scrollTop, height: el.clientHeight });
+      readScroll(el);
     });
     ro.observe(el);
     return () => ro.disconnect();
@@ -260,7 +344,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     const pin = () => {
       if (follow && atBottom.current) el.scrollTop = el.scrollHeight;
       // The list may have shrunk (filter/clear): re-read the clamped position.
-      setScroll({ top: el.scrollTop, height: el.clientHeight });
+      readScroll(el);
     };
     pin();
     // Again after layout (virtual-list height / slice changes land a frame later).
@@ -272,33 +356,6 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   const start = Math.max(0, Math.floor(scroll.top / LINE_HEIGHT) - 20);
   const end = Math.min(shown.length, Math.ceil((scroll.top + scroll.height) / LINE_HEIGHT) + 20);
 
-  const renderText = (line: Line) => {
-    if (test) return highlight(line.text);
-    if (line.raw)
-      return parseAnsi(line.raw).map((seg, i) =>
-        seg.style ? (
-          <span key={i} style={seg.style}>
-            {seg.text}
-          </span>
-        ) : (
-          seg.text
-        ),
-      );
-    return line.text;
-  };
-  const highlight = (line: string) => {
-    if (!test) return line;
-    const parts: React.ReactNode[] = [];
-    let i = 0;
-    for (const m of line.matchAll(new RegExp(test.source, "gi"))) {
-      if (!m[0]) continue; // zero-length match (e.g. `a*`): nothing to mark
-      parts.push(line.slice(i, m.index), <mark key={m.index}>{m[0]}</mark>);
-      i = m.index + m[0].length;
-    }
-    parts.push(line.slice(i));
-    return parts;
-  };
-
   const title = workload ? `${workload.kind.toLowerCase()}/${workload.name}` : tab.pod;
   const download = () => {
     const text = linesRef.current.map((l) => (prefix(l) ? `[${prefix(l)}] ${l.text}` : l.text)).join("\n");
@@ -309,30 +366,45 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     URL.revokeObjectURL(a.href);
   };
 
-  // Indices into `shown` of matching lines (wrap mode only renders the newest WRAP_LIMIT).
+  // Wrap mode only renders the newest WRAP_LIMIT lines, so only those count as matches.
   const wrapOffset = wrap ? Math.max(0, shown.length - WRAP_LIMIT) : 0;
-  const matches = useMemo(() => {
-    const out: number[] = [];
-    if (test) for (let i = wrapOffset; i < shown.length; i++) if (test.test(shown[i].text)) out.push(i);
-    return out;
+  // Arrival numbers of matching lines in `shown`, extended per batch. In "only matches" mode every shown line matches.
+  const matchRef = useRef<{ src: Line[]; test: RegExp; ns: number[]; next: number } | null>(null);
+  const matchNs = useMemo(() => {
+    if (!test || filterMode) return null;
+    let m = matchRef.current;
+    if (!m || m.src !== shown || m.test !== test) m = matchRef.current = { src: shown, test, ns: [], next: 0 };
+    for (let i = lowerBound(shown, m.next, lineN); i < shown.length; i++) if (test.test(shown[i].text)) m.ns.push(shown[i].n);
+    if (shown.length) {
+      m.next = shown[shown.length - 1].n + 1;
+      const drop = lowerBound(m.ns, shown[0].n, num);
+      if (drop) m.ns.splice(0, drop);
+    }
+    return m.ns;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [version, shown, test, wrapOffset]);
+  }, [version, shown, test, filterMode]);
+  const matchOffset = matchNs && shown.length ? lowerBound(matchNs, shown[Math.min(wrapOffset, shown.length - 1)].n, num) : 0;
+  const matchCount = !test ? 0 : matchNs ? matchNs.length - matchOffset : shown.length - wrapOffset;
+  /** Index into `shown` of the k-th match. */
+  const matchAt = (k: number) => (matchNs ? lowerBound(shown, matchNs[matchOffset + k], lineN) : wrapOffset + k);
   // ponytail: position is by match number, so it drifts when old lines are trimmed past MAX_LINES.
   const [cur, setCur] = useState<number | null>(null);
   useEffect(() => setCur(null), [test]);
-  const curLine = cur !== null && cur < matches.length ? matches[cur] : -1;
+  const curLine = cur !== null && cur < matchCount ? matchAt(cur) : -1;
   const goToMatch = (d: 1 | -1) => {
-    const n = matches.length;
+    const n = matchCount;
     const el = scrollRef.current;
     if (!n || !el) return;
     const next = cur === null || cur >= n ? (d > 0 ? 0 : n - 1) : (cur + d + n) % n;
     setCur(next);
     setFollow(false);
-    const idx = matches[next];
-    if (wrap) el.querySelector(`[data-line="${idx}"]`)?.scrollIntoView({ block: "center" });
+    const idx = matchAt(next);
+    if (wrap) el.querySelector(`[data-line="${shown[idx].n}"]`)?.scrollIntoView({ block: "center" });
     else el.scrollTop = idx * LINE_HEIGHT - el.clientHeight / 2;
   };
   const streaming = sources.filter((s) => s.state === "streaming").length;
+  // Re-measure when toolbar contents change; the ResizeObserver covers the toolbar's own size.
+  useLayoutEffect(fitToolbar, [podNames.length, containerNames.length, multi, workload, container, tail, since, search, searchError, matchCount, curLine]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Shown inline when the toolbar is wide, inside the ⋯ menu when narrow.
   const toggles = (
@@ -424,12 +496,12 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
           search && (
             <>
               <span className="muted small">
-                {curLine >= 0 ? `${cur! + 1} of ${matches.length}` : `${matches.length} matches`}
+                {curLine >= 0 ? `${cur! + 1} of ${matchCount}` : `${matchCount} matches`}
               </span>
-              <button className="btn btn-sm btn-icon" disabled={!matches.length} onClick={() => goToMatch(-1)} title="Previous match (Shift+Enter)">
+              <button className="btn btn-sm btn-icon" disabled={!matchCount} onClick={() => goToMatch(-1)} title="Previous match (Shift+Enter)">
                 ↑
               </button>
-              <button className="btn btn-sm btn-icon" disabled={!matches.length} onClick={() => goToMatch(1)} title="Next match (Enter)">
+              <button className="btn btn-sm btn-icon" disabled={!matchCount} onClick={() => goToMatch(1)} title="Next match (Enter)">
                 ↓
               </button>
             </>
@@ -496,7 +568,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
           atBottom.current = bottom;
           if (bottom) setAwayAt(null);
           else setAwayAt((a) => a ?? receivedRef.current);
-          setScroll({ top: el.scrollTop, height: el.clientHeight });
+          readScroll(el);
         }}
       >
         {wrap ? (
@@ -506,28 +578,29 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
                 Wrap mode shows the newest {WRAP_LIMIT.toLocaleString()} of {shown.length.toLocaleString()} lines
               </div>
             )}
-            {shown.slice(-WRAP_LIMIT).map((line, i) => (
-              <div key={i} data-line={wrapOffset + i} className={`log-line wrapped${wrapOffset + i === curLine ? " current" : ""}`}>
-                {prefix(line) && (
-                  <span className="log-src" style={{ color: srcList[line.src].color }}>
-                    {prefix(line)}
-                  </span>
-                )}
-                {renderText(line)}
-              </div>
+            {shown.slice(wrapOffset).map((line, i) => (
+              <LogRow
+                key={line.n}
+                line={line}
+                prefix={prefix(line)}
+                color={srcList[line.src]?.color}
+                current={wrapOffset + i === curLine}
+                test={test}
+              />
             ))}
           </div>
         ) : (
           <div style={{ height: shown.length * LINE_HEIGHT, position: "relative", minWidth: "100%" }}>
             {shown.slice(start, end).map((line, i) => (
-              <div key={start + i} className={`log-line${start + i === curLine ? " current" : ""}`} style={{ top: (start + i) * LINE_HEIGHT, height: LINE_HEIGHT }}>
-                {prefix(line) && (
-                  <span className="log-src" style={{ color: srcList[line.src].color }}>
-                    {prefix(line)}
-                  </span>
-                )}
-                {renderText(line)}
-              </div>
+              <LogRow
+                key={line.n}
+                line={line}
+                prefix={prefix(line)}
+                color={srcList[line.src]?.color}
+                current={start + i === curLine}
+                test={test}
+                top={(start + i) * LINE_HEIGHT}
+              />
             ))}
           </div>
         )}

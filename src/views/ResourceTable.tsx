@@ -98,18 +98,20 @@ function sortValue(row: Row, col: DisplayColumn, usage?: Map<string, Usage> | nu
   return s.toLowerCase();
 }
 
+// Watch upserts replace row objects, so a row's haystack never goes stale.
+const haystacks = new WeakMap<Row, string>();
 function matches(row: Row, terms: string[]): boolean {
-  if (!terms.length) return true;
-  const hay = [
-    row.name,
-    row.namespace ?? "",
-    ...row.cells.map(cellText),
-    ...Object.entries(row.labels ?? {}).map(([k, v]) => `${k}=${v}`),
-  ]
-    .join("\u0000")
-    .toLowerCase();
+  let hay = haystacks.get(row);
+  if (hay === undefined) {
+    hay = [row.name, row.namespace ?? "", ...row.cells.map(cellText), ...Object.entries(row.labels ?? {}).map(([k, v]) => `${k}=${v}`)]
+      .join("\u0000")
+      .toLowerCase();
+    haystacks.set(row, hay);
+  }
   return terms.every((t) => hay.includes(t));
 }
+
+const collator = new Intl.Collator();
 
 export function ResourceTable(props: Props) {
   const { context, resource, namespace, filter, wide, selectedUid, reveal, onSelect, onOpen, onCount } = props;
@@ -227,17 +229,19 @@ export function ResourceTable(props: Props) {
   const visibleRows = useMemo(() => {
     const terms = filter.toLowerCase().split(/\s+/).filter(Boolean);
     const all = [...rowsRef.current.values()];
-    const rows = all.filter((r) => matches(r, terms));
+    const filtered = terms.length ? all.filter((r) => matches(r, terms)) : all;
     const col = sort ? displayCols.find((c) => c.key === sort.key) : undefined;
+    let rows: Row[];
     if (col && sort) {
-      rows.sort((a, b) => {
-        const va = sortValue(a, col, usage);
-        const vb = sortValue(b, col, usage);
-        const c = typeof va === "number" && typeof vb === "number" ? va - vb : String(va).localeCompare(String(vb));
-        return c * sort.dir || a.name.localeCompare(b.name);
+      // Compute each row's sort value once rather than in every comparison.
+      const keyed = filtered.map((row) => ({ row, v: sortValue(row, col, usage) }));
+      keyed.sort((a, b) => {
+        const c = typeof a.v === "number" && typeof b.v === "number" ? a.v - b.v : collator.compare(String(a.v), String(b.v));
+        return c * sort.dir || collator.compare(a.row.name, b.row.name);
       });
+      rows = keyed.map((k) => k.row);
     } else {
-      rows.sort((a, b) => (a.namespace ?? "").localeCompare(b.namespace ?? "") || a.name.localeCompare(b.name));
+      rows = filtered.sort((a, b) => collator.compare(a.namespace ?? "", b.namespace ?? "") || collator.compare(a.name, b.name));
     }
     return { rows, total: all.length };
     // eslint-disable-next-line react-hooks/exhaustive-deps

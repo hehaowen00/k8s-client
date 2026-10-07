@@ -25,7 +25,8 @@ type ClusterTab = Extract<Tab, { kind: "cluster" }>;
 const PENDING = "pending:";
 
 export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean }) {
-  const { update, open } = useTabs();
+  const update = useTabs((s) => s.update);
+  const open = useTabs((s) => s.open);
   const discovery = useDiscovery(tab.context);
   const namespaces = useNamespaces(tab.context);
   const contexts = useContexts();
@@ -88,6 +89,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
 
   // Object counts for the expanded sidebar sections (cheap limit=1 lists), refreshed every 30s.
   const [kindCounts, setKindCounts] = useState<Record<string, number>>({});
+  useEffect(() => setKindCounts({}), [tab.context]);
   const expanded = useMemo(
     () => sections.filter((s) => !(!kindFilter && collapsed[s.title])).flatMap((s) => s.items.filter((r) => !isPlaceholder(r))),
     [sections, collapsed, kindFilter],

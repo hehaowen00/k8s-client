@@ -41,7 +41,8 @@ interface Props {
 }
 
 export function DetailTab({ tab, active }: { tab: Extract<Tab, { kind: "detail" }>; active: boolean }) {
-  const { update, close } = useTabs();
+  const update = useTabs((s) => s.update);
+  const close = useTabs((s) => s.close);
   return (
     <div className="detail-tab">
       <DetailView
@@ -400,7 +401,7 @@ function Overview({ obj, target, active }: { obj: KubeObject; target: Target; ac
       </Section>
 
       <KindSpecific obj={obj} target={target} />
-      <KindExtras obj={obj} target={target} />
+      <KindExtras obj={obj} target={target} active={active} />
 
       {conditions?.length ? (
         <Section title="Conditions">

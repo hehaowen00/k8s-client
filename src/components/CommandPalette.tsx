@@ -50,8 +50,12 @@ export function CommandPaletteHost() {
     setQ("");
     setSel(0);
     api.listContexts().then(setContexts, () => setContexts([]));
-    if (activeCtx) loadDiscovery(activeCtx).then(setResources, () => setResources([]));
+    let cancelled = false;
+    if (activeCtx) loadDiscovery(activeCtx).then((r) => !cancelled && setResources(r), () => !cancelled && setResources([]));
     else setResources([]);
+    return () => {
+      cancelled = true;
+    };
   }, [open, activeCtx]);
 
   const commands = useMemo<Command[]>(() => {

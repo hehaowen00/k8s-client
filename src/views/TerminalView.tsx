@@ -63,7 +63,7 @@ const THEME_LIGHT = {
 export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: boolean; onUpdate?: (patch: Partial<TermTab>) => void }) {
   const theme = useResolvedTheme();
   const fontSize = useSettings((s) => s.settings?.terminalFontSize ?? 13);
-  const { update: updateTab } = useTabs();
+  const updateTab = useTabs((s) => s.update);
   const update = (_id: string, patch: Partial<TermTab>) => (onUpdate ? onUpdate(patch) : updateTab(tab.id, patch));
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);

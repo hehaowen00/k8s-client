@@ -56,8 +56,11 @@ function StatusBar({ w, onClick }: { w: Overview["workloads"][number]; onClick?:
 
 export function OverviewView({ context, namespace, active, onPick }: Props) {
   const now = useNow(10000);
-  const [data, setData] = useState<Overview | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // Results are tagged with what they were loaded for, so a switch never shows the previous cluster/namespace.
+  const key = `${context}\u0000${namespace}`;
+  const [loaded, setLoaded] = useState<{ key: string; overview?: Overview; error?: string } | null>(null);
+  const data = loaded?.key === key ? loaded.overview ?? null : null;
+  const error = loaded?.key === key ? loaded.error ?? null : null;
   const discovery = useDiscovery(context);
   const nodeUsage = useUsageMap(context, "nodes", null, active);
 
@@ -66,12 +69,8 @@ export function OverviewView({ context, namespace, active, onPick }: Props) {
     let cancelled = false;
     const load = () =>
       api.clusterOverview(context, namespace || null).then(
-        (o) => {
-          if (cancelled) return;
-          setData(o);
-          setError(null);
-        },
-        (e) => !cancelled && setError(String(e)),
+        (o) => !cancelled && setLoaded({ key, overview: o }),
+        (e) => !cancelled && setLoaded((l) => ({ key, overview: l?.key === key ? l.overview : undefined, error: String(e) })),
       );
     load();
     const t = setInterval(load, 10000);
@@ -79,7 +78,7 @@ export function OverviewView({ context, namespace, active, onPick }: Props) {
       cancelled = true;
       clearInterval(t);
     };
-  }, [context, namespace, active]);
+  }, [context, namespace, active, key]);
 
   const find = (group: string, kind: string) => discovery.data?.find((r) => r.group === group && r.kind === kind);
   const kindGroup: Record<string, string> = { Pod: "", Deployment: "apps", StatefulSet: "apps", DaemonSet: "apps", Job: "batch" };

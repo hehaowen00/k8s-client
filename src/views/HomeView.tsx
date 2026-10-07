@@ -16,8 +16,8 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
   const { data, error, loading, reload } = useContexts();
   const clusters = useSettings((s) => s.settings?.clusters ?? NO_CLUSTERS);
   const updateCluster = useSettings((s) => s.updateCluster);
-  const { update } = useTabs();
-  const folders = useAsync(() => api.listKubeconfigFolders(), [useSettings((s) => s.contextsVersion)]);
+  const update = useTabs((s) => s.update);
+  const folders = useAsync(() => api.listKubeconfigFolders(), [], [useSettings((s) => s.contextsVersion)]);
   const [query, setQuery] = useState("");
 
   const afterFolderChange = (next: FolderInfo[]) => {

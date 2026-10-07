@@ -99,7 +99,7 @@ export function useSettingsBootstrap() {
 /** Contexts from every kubeconfig source; refreshes when files change. */
 export function useContexts() {
   const version = useSettings((s) => s.contextsVersion);
-  return useAsync<ContextInfo[]>(() => api.listContexts(), [version]);
+  return useAsync<ContextInfo[]>(() => api.listContexts(), [], [version]);
 }
 
 /** "dark" | "light" after resolving "system" against the OS preference. */
