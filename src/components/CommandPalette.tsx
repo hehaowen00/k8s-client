@@ -1,3 +1,4 @@
+import { shortcut } from "../keys";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { create } from "zustand";
 import { api, type ContextInfo, type ResourceInfo } from "../api";
@@ -84,13 +85,13 @@ export function CommandPaletteHost() {
     }
     const st = useSettings.getState();
     cmds.push(
-      { id: "new", group: "Commands", label: "New Tab", hint: "Ctrl+T", run: () => T.open({ kind: "home" }) },
-      { id: "close", group: "Commands", label: "Close Tab", hint: "Ctrl+W", run: () => activeId && T.close(activeId) },
-      { id: "split", group: "Commands", label: T.splitId ? "Close Split View" : "Split View", hint: "Ctrl+\\", run: () => T.toggleSplit() },
+      { id: "new", group: "Commands", label: "New Tab", hint: shortcut("T"), run: () => T.open({ kind: "home" }) },
+      { id: "close", group: "Commands", label: "Close Tab", hint: shortcut("W"), run: () => activeId && T.close(activeId) },
+      { id: "split", group: "Commands", label: T.splitId ? "Close Split View" : "Split View", hint: shortcut("\\"), run: () => T.toggleSplit() },
       ...(activeCtx ? [{ id: "cterm", group: "Commands", label: `Terminal for ${contextLabel(activeCtx)}`, run: () => openSession({ kind: "terminal", context: activeCtx }) }] : []),
       { id: "apply", group: "Commands", label: "Apply Manifest", run: () => T.open({ kind: "apply", context: activeCtx, namespace: null }) },
       { id: "pf", group: "Commands", label: "Port Forwards", run: () => openSingleton("portforwards") },
-      { id: "settings", group: "Commands", label: "Settings", hint: "Ctrl+,", run: () => openSingleton("settings") },
+      { id: "settings", group: "Commands", label: "Settings", hint: shortcut(","), run: () => openSingleton("settings") },
       ...(activeCtx ? [{ id: "csettings", group: "Commands", label: `Cluster Settings: ${contextLabel(activeCtx)}`, run: () => openClusterSettings(activeCtx) }] : []),
       {
         id: "theme",

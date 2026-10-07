@@ -1,3 +1,4 @@
+import { isMod, platform } from "./keys";
 import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { TabBar } from "./components/TabBar";
@@ -76,8 +77,14 @@ export default function App() {
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (!mod) return;
+      // Cmd+Tab is the macOS app switcher, so tabs cycle with Ctrl+Tab there, as in browsers.
+      const macCtrlTab = platform === "mac" && e.ctrlKey && e.key === "Tab";
+      if (!isMod(e) && !macCtrlTab) return;
+      const switching = e.key === "Tab" || e.key === "PageUp" || e.key === "PageDown" || /^[1-9]$/.test(e.key);
+      // A held key fires once (holding Cmd+W shouldn't close tab after tab); tab switching may repeat.
+      if (e.repeat && !switching) return;
+      // On Windows the modifier is Ctrl, which shells need (Ctrl+W, Ctrl+K…); in a terminal only Super and tab switching are the app's.
+      if (platform === "windows" && !e.metaKey && !switching && (e.target as Element | null)?.closest?.(".terminal-host")) return;
       const { tabs, activeId } = useTabs.getState();
       if ((e.key === "P" || e.key === "p") && e.shiftKey) {
         e.preventDefault();

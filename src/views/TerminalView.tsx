@@ -1,3 +1,4 @@
+import { isMod, platform, terminalClipboardLabel } from "../keys";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Channel } from "@tauri-apps/api/core";
 import { init as initGhostty, Terminal, FitAddon } from "ghostty-web";
@@ -130,12 +131,16 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
     // Keep app-level tab shortcuts and copy / paste away from the shell. Unlike xterm.js,
     // returning true here means "handled": the terminal skips the key.
     term.attachCustomKeyEventHandler((e) => {
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && (e.key === "Tab" || e.key === "PageUp" || e.key === "PageDown" || /^[1-9]$/.test(e.key))) return true;
-      if (mod && e.shiftKey && (e.key === "C" || e.key === "V")) {
+      if (e.ctrlKey && e.key === "Tab") return true;
+      if (isMod(e) && (e.key === "Tab" || e.key === "PageUp" || e.key === "PageDown" || /^[1-9]$/.test(e.key))) return true;
+      const clip = platform === "mac" ? e.metaKey && !e.shiftKey : e.ctrlKey && e.shiftKey;
+      const key = e.key.toLowerCase();
+      if (clip && (key === "c" || key === "v")) {
         if (e.type === "keydown") {
-          if (e.key === "C") navigator.clipboard.writeText(term.getSelection());
-          else navigator.clipboard.readText().then((t) => term.paste(t));
+          if (key === "c") {
+            const sel = term.getSelection();
+            if (sel) navigator.clipboard.writeText(sel);
+          } else navigator.clipboard.readText().then((t) => term.paste(t));
         }
         return true;
       }
@@ -287,7 +292,7 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
         <span className={`dot tone-bg-${session.state === "open" ? "ok" : session.state === "closed" ? "bad" : "warn"}`} />
         <span className="muted small">{session.state}</span>
         <div className="spacer" />
-        <span className="muted small">Ctrl+Shift+C / V to copy / paste</span>
+        <span className="muted small">{terminalClipboardLabel} to copy / paste</span>
         <button className="btn btn-sm" onClick={() => setNonce((n) => n + 1)}>
           {session.state === "closed" ? "Reconnect" : "Restart"}
         </button>

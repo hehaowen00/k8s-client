@@ -1,3 +1,4 @@
+import { backgroundClickLabel, isBackgroundClick, nextTabLabel, shortcut } from "../keys";
 import { useState } from "react";
 import logo from "../assets/logo.png";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -58,7 +59,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
         <h1>
           <img className="logo" src={logo} alt="" width={34} height={34} /> Kube Portal
         </h1>
-        <p className="muted">Pick a cluster. Ctrl/middle-click opens it in a background tab.</p>
+        <p className="muted">Pick a cluster. {backgroundClickLabel} or middle-click opens it in a background tab.</p>
 
         <div className="home-section-title">
           <span>Clusters{data ? ` (${data.length})` : ""}</span>
@@ -93,7 +94,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
               key={c.name}
               className="context-card"
               title={`${c.name}\n${c.source ?? "Default kubeconfig"}`}
-              onClick={(e) => openContext(c.name, e.ctrlKey || e.metaKey)}
+              onClick={(e) => openContext(c.name, isBackgroundClick(e))}
               onAuxClick={(e) => e.button === 1 && openContext(c.name, true)}
               onContextMenu={(e) =>
                 openContextMenu(e, [
@@ -197,7 +198,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
             <span className="context-avatar tool">⚙</span>
             <span className="context-meta">
               <span className="context-name">Settings</span>
-              <span className="muted small">Theme, kubeconfig, tools (Ctrl+,)</span>
+              <span className="muted small">Theme, kubeconfig, tools ({shortcut(",")})</span>
             </span>
           </button>
           <button className="context-card" onClick={() => openSingleton("portforwards")}>
@@ -223,7 +224,7 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
           <span>Shortcuts</span>
         </div>
         <div className="shortcuts">
-          <kbd>Ctrl+T</kbd> new tab <kbd>Ctrl+W</kbd> close tab <kbd>Ctrl+Tab</kbd> next tab <kbd>Ctrl+1…9</kbd> jump
+          <kbd>{shortcut("T")}</kbd> new tab <kbd>{shortcut("W")}</kbd> close tab <kbd>{nextTabLabel}</kbd> next tab <kbd>{shortcut("1…9")}</kbd> jump
           to tab <kbd>Middle-click</kbd> open in / close tab
         </div>
       </div>

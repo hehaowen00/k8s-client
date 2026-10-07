@@ -1,3 +1,4 @@
+import { isBackgroundClick } from "../keys";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, type ResourceInfo, type Row } from "../api";
 import type { Target } from "../actions";
@@ -71,7 +72,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
   const sections = useMemo(() => buildSections(discovery.data ?? [], kindFilter.toLowerCase()), [discovery.data, kindFilter]);
 
   const pick = (r: ResourceInfo, e: React.MouseEvent) => {
-    if (e.ctrlKey || e.metaKey || e.button === 1) {
+    if (isBackgroundClick(e)) {
       open({ kind: "cluster", context: tab.context, resource: r, namespace: tab.namespace }, { background: true });
     } else {
       update(tab.id, { resource: r, page: undefined });
@@ -79,7 +80,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
   };
   const extPages = useExtensions((s) => s.pages);
   const goPage = (page: "releases" | "charts" | `ext:${string}` | undefined, e: React.MouseEvent) => {
-    if (e.ctrlKey || e.metaKey) open({ kind: "cluster", context: tab.context, resource: null, namespace: tab.namespace, page }, { background: true });
+    if (isBackgroundClick(e)) open({ kind: "cluster", context: tab.context, resource: null, namespace: tab.namespace, page }, { background: true });
     else update(tab.id, { resource: null, page });
   };
 

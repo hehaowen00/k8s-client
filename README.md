@@ -10,11 +10,11 @@ Feature parity with Lens is tracked item by item in [`ROADMAP.md`](ROADMAP.md).
 
 - **Tabs & layout**: any mix of cluster views, object details, logs, shells, terminals, manifests, port
   forwards and settings. Drag to reorder, middle-click to close, right-click to duplicate / close others /
-  open in a **right split**. Tabs are restored on restart. A **command palette** (Ctrl+Shift+P / Ctrl+K)
+  open in a **right split**. Tabs are restored on restart. A **command palette** (Mod+Shift+P / Mod+K)
   jumps to any cluster, tab, resource type or command. Pinned clusters live in a **hotbar**.
 - **Dock**: logs, shells, attach sessions and terminals open in a dock at the bottom of the tab you're
   working in, as sub-tabs. Every cluster or detail tab has its own dock, so several tabs on the same
-  cluster keep separate sessions. Minimise with Ctrl+J, drag to resize, or pop an item out into its own tab.
+  cluster keep separate sessions. Minimise with Mod+J, drag to resize, or pop an item out into its own tab.
 - **Clusters**: contexts from `$KUBECONFIG` / `~/.kube/config`, **kubeconfig folders** (any file name;
   invalid files ignored; changes picked up live), and kubeconfigs **pasted** into Kube Portal. Per-cluster
   display name, colour, default namespace, accessible namespaces (for users who can't list namespaces) and
@@ -42,24 +42,27 @@ Feature parity with Lens is tracked item by item in [`ROADMAP.md`](ROADMAP.md).
 - **MCP server** (off by default): a read-only MCP endpoint on `127.0.0.1` for AI assistants. Per cluster you
   choose the resource types, namespaces, and whether full objects (Secret values always redacted), logs and
   events are shared; otherwise only `kubectl get`-style rows are. Every request is shown in an access log.
-- **Settings** (app menu, Ctrl+, or the command palette): app-wide theme (system / dark / light), kubeconfig
+- **Settings** (app menu, Mod+, or the command palette): app-wide theme (system / dark / light), kubeconfig
   sources, Helm / kubectl / shell, extensions, updates and the MCP server; each cluster has its own settings page (name, colour, icon,
   namespaces, proxy, MCP access) from its context menu or the command palette.
 
 ## Shortcuts
 
-On macOS, Cmd works wherever Ctrl is listed.
+**Mod** is Cmd on macOS, Super on Linux, and Ctrl or the Windows key on Windows. On Windows, Ctrl shortcuts other
+than tab switching go to the shell while a terminal is focused (the Windows key still works).
 
 | Keys | Action |
 | --- | --- |
-| Ctrl+T / Ctrl+W | New / close tab |
-| Ctrl+Tab / Ctrl+Shift+Tab, Ctrl+PgDn / PgUp | Next / previous tab |
-| Ctrl+1…9 | Jump to tab (9 = last) |
-| Ctrl+Shift+P, Ctrl+K | Command palette |
-| Ctrl+\\ | Toggle split view |
-| Ctrl+J | Minimise / restore the dock |
-| Ctrl+, | Settings |
-| Ctrl/middle-click | Open a cluster, resource type or object in a background tab |
+| Mod+T / Mod+W | New / close tab |
+| Mod+Tab / Mod+Shift+Tab, Mod+PgDn / PgUp (Ctrl+Tab on macOS) | Next / previous tab |
+| Mod+1…9 | Jump to tab (9 = last) |
+| Mod+Shift+P, Mod+K | Command palette |
+| Mod+\\ | Toggle split view |
+| Mod+J | Minimise / restore the dock |
+| Mod+, | Settings |
+| Mod+S | Save (YAML editor) / apply (Apply Manifest) |
+| Cmd+C / V (macOS), Ctrl+Shift+C / V | Copy / paste in a terminal |
+| Cmd-click (macOS), Ctrl-click, middle-click | Open a cluster, resource type or object in a background tab |
 | Double-click / Enter | Open an object in a new tab |
 | Right-click a column header | Choose columns (drag headers to reorder) |
 

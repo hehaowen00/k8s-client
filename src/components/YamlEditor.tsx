@@ -1,3 +1,4 @@
+import { platform } from "../keys";
 import CodeMirror from "@uiw/react-codemirror";
 import { yaml } from "@codemirror/lang-yaml";
 import { oneDark } from "@codemirror/theme-one-dark";
@@ -25,7 +26,8 @@ export function YamlEditor({
       EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { fontFamily: "var(--mono)" } }),
       keymap.of([
         {
-          key: "Mod-s",
+          // CodeMirror's "Mod" is Ctrl on Linux; the app uses Super there.
+          key: platform === "linux" ? "Meta-s" : "Mod-s",
           preventDefault: true,
           run: () => {
             saveRef.current?.();

@@ -1,3 +1,4 @@
+import { isBackgroundClick } from "../keys";
 import { useState } from "react";
 import { useSettings, NO_CLUSTERS } from "../settings";
 import { usePref } from "../hooks";
@@ -59,7 +60,7 @@ export function Hotbar() {
               setDragCtx(null);
               setOverCtx(null);
             }}
-            onClick={(e) => openCluster(ctx, { focusExisting: !(e.ctrlKey || e.metaKey), background: e.ctrlKey || e.metaKey })}
+            onClick={(e) => openCluster(ctx, { focusExisting: !isBackgroundClick(e), background: isBackgroundClick(e) })}
             onAuxClick={(e) => e.button === 1 && openCluster(ctx, { background: true })}
             onContextMenu={(e) =>
               openContextMenu(e, [
