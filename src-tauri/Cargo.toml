@@ -1,6 +1,6 @@
 [package]
 name = "kube-portal"
-version = "0.1.2"
+version = "0.1.3"
 description = "A tabbed Kubernetes IDE"
 authors = ["hehaowen00"]
 edition = "2021"
