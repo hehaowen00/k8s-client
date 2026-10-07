@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { TabBar } from "./components/TabBar";
 import { ContextMenuHost } from "./components/ContextMenu";
@@ -47,7 +47,9 @@ function TabContent({ tab, active }: { tab: Tab; active: boolean }) {
 
 export default function App() {
   const { tabs, activeId, splitId, open, close, cycle, activate, toggleSplit } = useTabs();
-  const [splitRatio, setSplitRatio] = usePref("split.ratio", 0.5);
+  const [savedRatio, saveRatio] = usePref("split.ratio", 0.5);
+  const [dragRatio, setDragRatio] = useState<number | null>(null);
+  const splitRatio = dragRatio ?? savedRatio;
   const split = splitId && splitId !== activeId && tabs.some((t) => t.id === splitId) ? splitId : null;
   useSettingsBootstrap();
   useEffect(() => {
@@ -149,10 +151,16 @@ export default function App() {
               onMouseDown={(e) => {
                 e.preventDefault();
                 const host = (e.currentTarget.parentElement as HTMLElement).getBoundingClientRect();
-                const move = (ev: MouseEvent) => setSplitRatio(Math.min(0.8, Math.max(0.2, (ev.clientX - host.left) / host.width)));
+                let ratio = savedRatio;
+                const move = (ev: MouseEvent) => {
+                  ratio = Math.min(0.8, Math.max(0.2, (ev.clientX - host.left) / host.width));
+                  setDragRatio(ratio);
+                };
                 const up = () => {
                   window.removeEventListener("mousemove", move);
                   window.removeEventListener("mouseup", up);
+                  saveRatio(ratio);
+                  setDragRatio(null);
                 };
                 window.addEventListener("mousemove", move);
                 window.addEventListener("mouseup", up);

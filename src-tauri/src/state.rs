@@ -140,7 +140,10 @@ impl AppState {
         // Hashed so that context names differing only in punctuation can't share a file.
         use sha2::{Digest, Sha256};
         let path = dir.join(format!("{}.yaml", hex::encode(&Sha256::digest(context.as_bytes())[..16])));
-        crate::settings::write_private(&path, yaml.as_bytes()).map_err(err)?;
+        // Helm polls through here every few seconds; only write when the kubeconfig actually changed.
+        if std::fs::read(&path).ok().as_deref() != Some(yaml.as_bytes()) {
+            crate::settings::write_private(&path, yaml.as_bytes()).map_err(err)?;
+        }
         Ok(path)
     }
 
