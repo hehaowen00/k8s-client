@@ -6,7 +6,7 @@ split view).
 
 ## Features
 
-Feature parity with Lens is tracked item by item in [`../ROADMAP.md`](../ROADMAP.md) (`pnpm roadmap`).
+Feature parity with Lens is tracked item by item in [`ROADMAP.md`](ROADMAP.md).
 
 - **Tabs & layout**: any mix of cluster views, object details, logs, shells, terminals, manifests, port
   forwards and settings. Drag to reorder, middle-click to close, right-click to duplicate / close others /
@@ -48,6 +48,8 @@ Feature parity with Lens is tracked item by item in [`../ROADMAP.md`](../ROADMAP
 
 ## Shortcuts
 
+On macOS, Cmd works wherever Ctrl is listed.
+
 | Keys | Action |
 | --- | --- |
 | Ctrl+T / Ctrl+W | New / close tab |
@@ -63,16 +65,17 @@ Feature parity with Lens is tracked item by item in [`../ROADMAP.md`](../ROADMAP
 
 ## Install
 
-From the repo root, `make install` rebuilds the app, packages it and installs it:
+`make install` rebuilds the app, packages it and installs it:
 
 | OS | What it does |
 | --- | --- |
 | macOS | Builds `Kube Portal.app` and copies it to `/Applications` (`APP_DIR=…` to change) |
-| Linux | Installs `portal` to `~/.local/bin` with a desktop entry and icons (`sudo make install PREFIX=/usr/local` for system-wide) |
+| Linux | Installs `kube-portal` to `~/.local/bin` with a desktop entry and icons (`sudo make install PREFIX=/usr/local` for system-wide) |
 | Windows | Builds the NSIS installer and runs it silently (per-user; Start menu entry). Run from Git Bash / MSYS `make` |
 
 `make uninstall` removes it again (settings are kept). `make help` lists all targets (`dev`, `build`, `package`,
-`test`, `roadmap`, `clean`).
+`test`, `prune`, `clean`). macOS builds are ad-hoc signed; pass `SIGN_ID="Developer ID Application: …"` to
+sign for distribution.
 
 ## Development
 
@@ -83,13 +86,12 @@ Helm features need the `helm` CLI on PATH (or a path in Settings).
 pnpm install
 pnpm tauri dev      # run in development
 pnpm tauri build    # produce a release bundle
-pnpm roadmap        # Lens parity progress (--todo for what's left)
-cd src-tauri && cargo test --lib
+make test           # type-check, Rust tests and clippy
 ```
 
 ### Where things are stored
 
-- Settings: `~/.config/kube-portal/settings.db`.
+- Settings: `~/.config/kube-portal/settings.db` (`$XDG_CONFIG_HOME/kube-portal` if set).
 - Pasted kubeconfigs: `kubeconfigs/` in the same dir (owner-only permissions).
 - Extensions: `extensions/` in the same dir.
 - Downloaded kubectl binaries: `bin/` in the app data dir.
@@ -132,6 +134,6 @@ Kube Portal has no central update server; updates come from a feed you publish:
 - `src-tauri/src/`: `kube_ops.rs` (discovery, live tables, object ops, counts, access checks),
   `kubeconfigs.rs` / `settings.rs` (sources, settings, watcher), `streams.rs` / `multi_logs.rs` (logs, exec,
   attach, PTY), `portforward.rs`, `nodeops.rs` (drain, node shell, cron jobs), `metrics.rs` (metrics-server,
-  Prometheus, overview), `helm.rs`, `kubectl.rs`, `updates.rs`, `extensions.rs`
+  Prometheus, overview), `helm.rs`, `kubectl.rs`, `updates.rs`, `extensions.rs`, `mcp.rs` (MCP server)
 - `src/`: `store.ts` (tabs), `settings.ts`, `extensions.ts`, `metrics.ts`, `permissions.ts`, `views/`,
   `components/`
