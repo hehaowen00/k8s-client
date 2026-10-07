@@ -1,3 +1,4 @@
+import { shortcut } from "../keys";
 import { useState } from "react";
 import { api } from "../api";
 import { useNamespaces } from "../hooks";
@@ -97,7 +98,7 @@ export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
           ))}
         </Select>
         <div className="spacer" />
-        <span className="muted small">Server-side apply · Ctrl+S</span>
+        <span className="muted small">Server-side apply · {shortcut("S")}</span>
         <button className="btn btn-sm btn-primary" disabled={!context || busy} onClick={apply}>
           {busy ? "Applying…" : "Apply"}
         </button>

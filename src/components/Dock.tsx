@@ -1,3 +1,4 @@
+import { shortcut } from "../keys";
 import { dock, tabTitle, type DockHost } from "../store";
 import { LogsView } from "../views/LogsView";
 import { TerminalView } from "../views/TerminalView";
@@ -67,7 +68,7 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
               ⧉
             </button>
           )}
-          <button className="btn btn-xs btn-ghost" title={open ? "Minimise (Ctrl+J)" : "Restore (Ctrl+J)"} onClick={() => dock.setOpen(host.id, !open)}>
+          <button className="btn btn-xs btn-ghost" title={`${open ? "Minimise" : "Restore"} (${shortcut("J")})`} onClick={() => dock.setOpen(host.id, !open)}>
             {open ? "▾" : "▴"}
           </button>
           <button className="btn btn-xs btn-ghost" title="Close all" onClick={() => dock.closeAll(host.id)}>

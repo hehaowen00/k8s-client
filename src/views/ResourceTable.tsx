@@ -1,3 +1,4 @@
+import { isBackgroundClick } from "../keys";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, canDelete, isNode, isPod, isRestartable, isScalable, type Column, type Usage, type ResourceInfo, type Row } from "../api";
 import { deleteMany, restartMany, targetMenu } from "../actions";
@@ -469,7 +470,7 @@ export function ResourceTable(props: Props) {
               className={`rtable-row ${row.uid === selectedUid ? "selected" : ""} ${checked.has(row.uid) ? "checked" : ""}`}
               style={{ gridTemplateColumns: gridTemplate, top: (start + i) * ROW_HEIGHT, height: ROW_HEIGHT }}
               onClick={(e) => {
-                if (e.ctrlKey || e.metaKey) onOpen(row, true);
+                if (isBackgroundClick(e)) onOpen(row, true);
                 else onSelect(row.uid === selectedUid ? null : row);
               }}
               onDoubleClick={() => onOpen(row, false)}

@@ -1,3 +1,4 @@
+import { isBackgroundClick } from "./keys";
 import { createContext, useContext } from "react";
 import { openDetail, type Target } from "./actions";
 
@@ -19,6 +20,4 @@ export function useOpenObject() {
   };
 }
 
-/** Ctrl/Cmd or middle click: open in a background tab, as elsewhere in the app. */
-export const inBackground = (e: { ctrlKey: boolean; metaKey: boolean; button: number }) =>
-  e.ctrlKey || e.metaKey || e.button === 1;
+export const inBackground = isBackgroundClick;

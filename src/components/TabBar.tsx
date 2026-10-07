@@ -1,3 +1,4 @@
+import { shortcut } from "../keys";
 import { useEffect, useRef, useState } from "react";
 import { contextColor, tabContext, tabTitle, useTabs, type Tab, contextLabel } from "../store";
 import { openContextMenu } from "./ContextMenu";
@@ -129,10 +130,10 @@ export function TabBar() {
                 openContextMenu(e, [
                   { label: "Duplicate Tab", onClick: () => duplicate(t) },
                   t.id === splitId
-                    ? { label: "Close Split", hint: "Ctrl+\\", onClick: () => setSplit(null) }
-                    : { label: "Open in Right Split", hint: "Ctrl+\\", disabled: t.id === activeId, onClick: () => setSplit(t.id) },
+                    ? { label: "Close Split", hint: shortcut("\\"), onClick: () => setSplit(null) }
+                    : { label: "Open in Right Split", hint: shortcut("\\"), disabled: t.id === activeId, onClick: () => setSplit(t.id) },
                   { separator: true, label: "" },
-                  { label: "Close", hint: "Ctrl+W", onClick: () => close(t.id) },
+                  { label: "Close", hint: shortcut("W"), onClick: () => close(t.id) },
                   { label: "Close Other Tabs", onClick: () => closeOthers(t.id) },
                   { label: "Close Tabs to the Right", onClick: () => closeRight(t.id) },
                 ])
@@ -155,7 +156,7 @@ export function TabBar() {
       </div>
       <button
         className={`tab-new ${tabs.find((t) => t.id === activeId)?.kind === "home" ? "active" : ""}`}
-        title="New tab (Ctrl+T)"
+        title={`New tab (${shortcut("T")})`}
         onClick={() => open({ kind: "home" })}>
         +
       </button>

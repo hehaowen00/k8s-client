@@ -1,3 +1,4 @@
+import { shortcut } from "../keys";
 import { useEffect, useState } from "react";
 import { api, hasWorkloadLogs, isCronJob, isNode, isPod, isRestartable, isScalable, type KubeObject, type ResourceInfo } from "../api";
 import {
@@ -751,7 +752,7 @@ function YamlView({ target, perms }: { target: Target; perms: Perms }) {
         >
           Reload
         </button>
-        {dirty && <span className="muted small">Unsaved changes · Ctrl+S to save</span>}
+        {dirty && <span className="muted small">Unsaved changes · {shortcut("S")} to save</span>}
       </div>
       {error && <div className="error-box">{error}</div>}
       {original === null && !error ? (
