@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { persist } from "zustand/middleware";
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { ResourceInfo } from "./api";
 import { useSettings } from "./settings";
 
@@ -126,6 +126,44 @@ export function initialNamespace(context: string): string {
   return lastNamespaces()[context] ?? useSettings.getState().settings?.clusters[context]?.defaultNamespace ?? "";
 }
 
+/** localStorage that skips unchanged values and writes at most once per second (flushed when the window closes). */
+const coalescedStorage: StateStorage = (() => {
+  const pending = new Map<string, string>();
+  const written = new Map<string, string>();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const flush = () => {
+    clearTimeout(timer);
+    timer = undefined;
+    for (const [k, v] of pending) {
+      try {
+        localStorage.setItem(k, v);
+        written.set(k, v);
+      } catch {
+        /* ignore */
+      }
+    }
+    pending.clear();
+  };
+  window.addEventListener("pagehide", flush);
+  window.addEventListener("beforeunload", flush);
+  return {
+    getItem: (k) => pending.get(k) ?? localStorage.getItem(k),
+    setItem: (k, v) => {
+      if ((written.get(k) ?? localStorage.getItem(k)) === v) {
+        pending.delete(k);
+        return;
+      }
+      pending.set(k, v);
+      timer ??= setTimeout(flush, 1000);
+    },
+    removeItem: (k) => {
+      pending.delete(k);
+      written.delete(k);
+      localStorage.removeItem(k);
+    },
+  };
+})();
+
 export const useTabs = create<TabsState>()(
   persist(
     (set, get) => ({
@@ -207,7 +245,16 @@ export const useTabs = create<TabsState>()(
         set({ activeId: tabs[next].id });
       },
     }),
-    { name: "kubetab.tabs", version: 1 },
+    {
+      name: "kubetab.tabs",
+      version: 1,
+      storage: createJSONStorage(() => coalescedStorage),
+      partialize: (s) => ({
+        tabs: s.tabs.flatMap((t) => (t.kind === "cluster" ? [{ ...t, dock: undefined }] : [])),
+        activeId: s.activeId,
+        splitId: s.splitId,
+      }),
+    },
   ),
 );
 

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { useNamespaces, usePref } from "../hooks";
+import { useNamespaces } from "../hooks";
 import { useContexts } from "../settings";
 import { useTabs, type Tab, contextLabel } from "../store";
 import { YamlEditor } from "../components/YamlEditor";
@@ -16,12 +16,19 @@ data:
   hello: world
 `;
 
+// Drafts used to be stored per tab and were never removed.
+try {
+  for (const k of Object.keys(localStorage)) if (k.startsWith("kubetab.pref.apply.draft.")) localStorage.removeItem(k);
+} catch {
+  /* ignore */
+}
+
 export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
   const { update } = useTabs();
   const contexts = useContexts();
   const context = tab.context ?? contexts.data?.find((c) => c.current)?.name ?? contexts.data?.[0]?.name ?? null;
   const namespaces = useNamespaces(context);
-  const [draft, setDraft] = usePref(`apply.draft.${tab.id}`, SAMPLE);
+  const [draft, setDraft] = useState(SAMPLE);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<{ ok: boolean; lines: string[] } | null>(null);
 
