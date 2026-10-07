@@ -17,24 +17,30 @@ export function forgetContext(context: string) {
   namespaceCache.delete(context);
 }
 
-/** Generic async loader with reload. */
-export function useAsync<T>(fn: () => Promise<T>, deps: unknown[]) {
-  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean }>({ loading: true });
+const sameDeps = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => Object.is(x, b[i]));
+
+/**
+ * Generic async loader with reload. Results are only returned for the `deps` they were loaded with;
+ * a change in `refresh` reloads but keeps showing the previous result meanwhile.
+ */
+export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], refresh: unknown[] = []) {
+  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean; deps?: unknown[] }>({ loading: true });
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setState((s) => ({ ...s, loading: true, error: undefined }));
     fn().then(
-      (data) => !cancelled && setState({ data, loading: false }),
-      (e) => !cancelled && setState({ error: String(e), loading: false }),
+      (data) => !cancelled && setState({ data, loading: false, deps }),
+      (e) => !cancelled && setState({ error: String(e), loading: false, deps }),
     );
     return () => {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, nonce]);
+  }, [...deps, ...refresh, nonce]);
   const reload = useCallback(() => setNonce((n) => n + 1), []);
-  return { ...state, reload };
+  if (!state.deps || !sameDeps(state.deps, deps)) return { data: undefined, error: undefined, loading: true, reload };
+  return { data: state.data, error: state.error, loading: state.loading, reload };
 }
 
 export function useDiscovery(context: string | null) {

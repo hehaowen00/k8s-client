@@ -684,7 +684,7 @@ function RepoManager({ onChanged }: { onChanged: () => void }) {
 type ChartView = "readme" | "values" | "install";
 
 function ChartDetail({ context, chart, onClose }: { context: string; chart: HelmChart; onClose: () => void }) {
-  const { open } = useTabs();
+  const open = useTabs((s) => s.open);
   const namespaces = useNamespaces(context);
   const [view, setView] = useState<ChartView>("readme");
   const [versions, setVersions] = useState<HelmChart[]>([]);

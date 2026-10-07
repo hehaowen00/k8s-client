@@ -25,7 +25,7 @@ try {
 }
 
 export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
-  const { update } = useTabs();
+  const update = useTabs((s) => s.update);
   const contexts = useContexts();
   const context = tab.context ?? contexts.data?.find((c) => c.current)?.name ?? contexts.data?.[0]?.name ?? null;
   const namespaces = useNamespaces(context);

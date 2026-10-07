@@ -555,7 +555,7 @@ function SchemaTree({ schema, depth = 0 }: { schema?: KubeObject; depth?: number
 function CrdDetails({ obj, target }: { obj: KubeObject; target: Target }) {
   const spec = obj.spec ?? {};
   const names = spec.names ?? {};
-  const { open } = useTabs();
+  const open = useTabs((s) => s.open);
   const discovery = useDiscovery(target.context);
   const versions: KubeObject[] = spec.versions ?? [];
   const storage = versions.find((v) => v.storage) ?? versions[0];
@@ -648,11 +648,13 @@ export function RelatedPods({
   labelSelector,
   fieldSelector,
   namespace,
+  active,
 }: {
   target: Target;
   labelSelector?: string;
   fieldSelector?: string;
   namespace: string | null;
+  active: boolean;
 }) {
   const [count, setCount] = useState<number | null>(null);
   const onCount = useCallback((n: number) => setCount(n), []);
@@ -666,7 +668,7 @@ export function RelatedPods({
           namespace={namespace ?? ALL_NAMESPACES}
           filter=""
           wide={false}
-          active
+          active={active}
           compact
           selectedUid={null}
           labelSelector={labelSelector}
@@ -778,7 +780,7 @@ function ExtPanelView({ panel, obj, target }: { panel: ExtPanel; obj: KubeObject
 }
 
 /** Extra sections for kinds not covered by the basic overview, plus related resources. */
-export function KindExtras({ obj, target }: { obj: KubeObject; target: Target }) {
+export function KindExtras({ obj, target, active }: { obj: KubeObject; target: Target; active: boolean }) {
   const { resource: r } = target;
   const g = r.group;
   const k = r.kind;
@@ -809,17 +811,17 @@ export function KindExtras({ obj, target }: { obj: KubeObject; target: Target })
   let related: React.ReactNode = null;
   if (hasWorkloadLogs(r)) {
     const sel = selectorString(obj.spec?.selector);
-    if (sel) related = <RelatedPods target={target} labelSelector={sel} namespace={target.namespace} />;
+    if (sel) related = <RelatedPods target={target} active={active} labelSelector={sel} namespace={target.namespace} />;
   } else if (g === "" && k === "Service" && obj.spec?.selector && Object.keys(obj.spec.selector).length) {
     const sel = Object.entries(obj.spec.selector).map(([a, b]) => `${a}=${b}`).join(",");
     related = (
       <>
         <Endpoints target={target} />
-        <RelatedPods target={target} labelSelector={sel} namespace={target.namespace} />
+        <RelatedPods target={target} active={active} labelSelector={sel} namespace={target.namespace} />
       </>
     );
   } else if (isNode(r)) {
-    related = <RelatedPods target={target} fieldSelector={`spec.nodeName=${target.name}`} namespace={null} />;
+    related = <RelatedPods target={target} active={active} fieldSelector={`spec.nodeName=${target.name}`} namespace={null} />;
   }
   const panels = useExtensions((s) => s.panels).filter((p) => matchesKind(p.kinds, r));
   if (!extra && !related && !panels.length) return null;

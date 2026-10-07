@@ -1,3 +1,4 @@
+import { useShallow } from "zustand/react/shallow";
 import { shortcut } from "../keys";
 import { useEffect, useRef, useState } from "react";
 import { contextColor, tabContext, tabTitle, useTabs, type Tab, contextLabel } from "../store";
@@ -21,7 +22,14 @@ const ICONS: Record<Tab["kind"], string> = {
 const OVERLAY_TITLEBAR = navigator.userAgent.includes("Mac");
 
 export function TabBar() {
-  const { tabs, activeId, splitId, setSplit, activate, close, closeOthers, closeRight, open, move } = useTabs();
+  const { tabs, activeId, splitId } = useTabs(useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, splitId: s.splitId })));
+  const setSplit = useTabs((s) => s.setSplit);
+  const activate = useTabs((s) => s.activate);
+  const close = useTabs((s) => s.close);
+  const closeOthers = useTabs((s) => s.closeOthers);
+  const closeRight = useTabs((s) => s.closeRight);
+  const open = useTabs((s) => s.open);
+  const move = useTabs((s) => s.move);
   const [dragIdx, setDragIdx] = useState<number | null>(null);
   // Where the dragged tab would land: before or after the tab at `idx`.
   const [over, setOver] = useState<{ idx: number; after: boolean } | null>(null);
