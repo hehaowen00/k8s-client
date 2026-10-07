@@ -43,8 +43,25 @@ export interface Series {
   cpu: Point[];
   memory: Point[];
   source: "prometheus" | "metrics-server" | null;
+  /** Seconds between samples. */
+  step: number;
+  /** Unix seconds the window ends at. */
+  end: number;
   error?: string;
 }
+
+export const SPANS = [
+  { label: "1m", seconds: 60 },
+  { label: "5m", seconds: 300 },
+  { label: "10m", seconds: 600 },
+  { label: "15m", seconds: 900 },
+  { label: "1hr", seconds: 3600 },
+  { label: "3hr", seconds: 3 * 3600 },
+  { label: "6hr", seconds: 6 * 3600 },
+  { label: "12hr", seconds: 12 * 3600 },
+];
+export const DEFAULT_SPAN = 3600;
+export const MAX_BARS = 60;
 
 const promCache = new Map<string, Promise<PrometheusTarget | null>>();
 export function detectPrometheus(context: string, refresh = false) {
@@ -58,7 +75,7 @@ export function detectPrometheus(context: string, refresh = false) {
 /** Samples collected while the app is open, so fallback charts survive tab switches. */
 const samples = new Map<string, { cpu: Point[]; memory: Point[] }>();
 const SAMPLE_EVERY = 10_000;
-const KEEP_SECONDS = 3600;
+const KEEP_SECONDS = SPANS[SPANS.length - 1].seconds;
 
 export interface MetricSpec {
   /** Stable id for the sample buffer, e.g. "ctx|pod|ns/name". */
@@ -69,10 +86,19 @@ export interface MetricSpec {
   sample: () => Promise<{ cpu: number; memory: number } | null>;
 }
 
-export const WINDOW_SECONDS = 3600;
+function since(points: Point[], t: number): Point[] {
+  let lo = 0;
+  let hi = points.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (points[mid][0] <= t) lo = mid + 1;
+    else hi = mid;
+  }
+  return points.slice(lo);
+}
 
-export function useMetricSeries(context: string, spec: MetricSpec | null, active: boolean): Series {
-  const [series, setSeries] = useState<Series>({ cpu: [], memory: [], source: null });
+export function useMetricSeries(context: string, spec: MetricSpec | null, active: boolean, span: number): Series {
+  const [series, setSeries] = useState<Series>({ cpu: [], memory: [], source: null, step: 0, end: 0 });
   const key = spec?.key;
   useEffect(() => {
     if (!spec || !active) return;
@@ -82,39 +108,51 @@ export function useMetricSeries(context: string, spec: MetricSpec | null, active
       const prom = await detectPrometheus(context);
       if (cancelled) return;
       if (prom) {
+        const step = Math.max(5, span / MAX_BARS);
         const load = async () => {
-          const end = Date.now() / 1000;
-          const start = end - WINDOW_SECONDS;
+          const end = Math.floor(Date.now() / 1000 / step) * step;
           try {
-            const [cpu, memory] = await api.prometheusRange(context, spec.prometheus, start, end, 60);
-            if (!cancelled) setSeries({ cpu, memory, source: "prometheus" });
+            const [cpu, memory] = await api.prometheusRange(context, spec.prometheus, end - span + step, end, step);
+            if (!cancelled) setSeries({ cpu, memory, source: "prometheus", step, end });
           } catch (e) {
-            if (!cancelled) setSeries((s) => ({ ...s, source: "prometheus", error: String(e) }));
+            if (!cancelled) setSeries((s) => ({ ...s, source: "prometheus", step, end, error: String(e) }));
           }
         };
         load();
-        timer = setInterval(load, 30_000);
+        timer = setInterval(load, Math.min(30, Math.max(10, step)) * 1000);
         return;
       }
       const buf = samples.get(spec.key) ?? { cpu: [], memory: [] };
       samples.set(spec.key, buf);
+      const step = SAMPLE_EVERY / 1000;
+      const emit = (end: number) => {
+        const start = end - span;
+        setSeries({
+          cpu: since(buf.cpu, start),
+          memory: since(buf.memory, start),
+          source: buf.cpu.length ? "metrics-server" : null,
+          step,
+          end,
+        });
+      };
       const sample = async () => {
         const u = await spec.sample().catch(() => null);
         if (cancelled) return;
-        if (!u) {
-          setSeries({ cpu: buf.cpu, memory: buf.memory, source: buf.cpu.length ? "metrics-server" : null });
-          return;
-        }
         const t = Date.now() / 1000;
-        buf.cpu.push([t, u.cpu]);
-        buf.memory.push([t, u.memory]);
-        while (buf.cpu.length && buf.cpu[0][0] < t - KEEP_SECONDS) {
-          buf.cpu.shift();
-          buf.memory.shift();
+        if (u) {
+          buf.cpu.push([t, u.cpu]);
+          buf.memory.push([t, u.memory]);
+          const drop = buf.cpu.findIndex((p) => p[0] >= t - KEEP_SECONDS);
+          if (drop > 0) {
+            buf.cpu.splice(0, drop);
+            buf.memory.splice(0, drop);
+          }
         }
-        setSeries({ cpu: [...buf.cpu], memory: [...buf.memory], source: "metrics-server" });
+        emit(t);
       };
-      sample();
+      const last = buf.cpu[buf.cpu.length - 1];
+      if (last && Date.now() / 1000 - last[0] < step) emit(Date.now() / 1000);
+      else sample();
       timer = setInterval(sample, SAMPLE_EVERY);
     })();
     return () => {
@@ -122,7 +160,7 @@ export function useMetricSeries(context: string, spec: MetricSpec | null, active
       if (timer) clearInterval(timer);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context, key, active]);
+  }, [context, key, active, span]);
   return series;
 }
 

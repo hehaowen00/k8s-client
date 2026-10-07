@@ -1,6 +1,9 @@
-import { useMetricSeries, type MetricSpec } from "../metrics";
+import { useState } from "react";
+import { DEFAULT_SPAN, SPANS, useMetricSeries, type MetricSpec } from "../metrics";
 import { formatBytes, formatCpu } from "../util";
-import { LineChart, type RefLine } from "./Chart";
+import { BarChart, type RefLine } from "./Chart";
+
+let lastSpan = DEFAULT_SPAN;
 
 export function MetricsPanel({
   context,
@@ -15,7 +18,8 @@ export function MetricsPanel({
   cpuRefs?: RefLine[];
   memoryRefs?: RefLine[];
 }) {
-  const series = useMetricSeries(context, spec, active);
+  const [span, setSpan] = useState(lastSpan);
+  const series = useMetricSeries(context, spec, active, span);
   if (!spec) return null;
   if (series.source === null && !series.cpu.length) {
     return (
@@ -28,13 +32,48 @@ export function MetricsPanel({
   const empty = collecting ? "Collecting samples (every 10s)…" : "No data";
   return (
     <>
+      <div className="segmented chart-spans">
+        {SPANS.map((s) => (
+          <button
+            key={s.seconds}
+            className={span === s.seconds ? "active" : ""}
+            onClick={() => {
+              lastSpan = s.seconds;
+              setSpan(s.seconds);
+            }}
+          >
+            {s.label}
+          </button>
+        ))}
+      </div>
       <div className="chart-row">
-        <LineChart title="CPU" points={series.cpu} format={formatCpu} refs={cpuRefs} emptyText={empty} minMax={0.01} />
-        <LineChart title="Memory" points={series.memory} format={formatBytes} refs={memoryRefs} emptyText={empty} bytes minMax={8 * 1024 * 1024} />
+        <BarChart
+          title="CPU"
+          points={series.cpu}
+          format={formatCpu}
+          refs={cpuRefs}
+          emptyText={empty}
+          minMax={0.01}
+          span={span}
+          step={series.step}
+          end={series.end}
+        />
+        <BarChart
+          title="Memory"
+          points={series.memory}
+          format={formatBytes}
+          refs={memoryRefs}
+          emptyText={empty}
+          bytes
+          minMax={8 * 1024 * 1024}
+          span={span}
+          step={series.step}
+          end={series.end}
+        />
       </div>
       <div className="muted small metrics-note">
         {series.source === "prometheus"
-          ? "Last hour from Prometheus"
+          ? "From Prometheus"
           : "Sampled from metrics-server while Kube Portal is open (install Prometheus for history)"}
         {series.error && <span className="tone-warn"> · {series.error}</span>}
       </div>
