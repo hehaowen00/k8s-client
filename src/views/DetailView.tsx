@@ -1,5 +1,6 @@
 import { shortcut } from "../keys";
 import { useEffect, useState } from "react";
+import { restartAcrossDialog } from "../components/RestartAcrossDialog";
 import { api, hasWorkloadLogs, isCronJob, isNode, isPod, isRestartable, isScalable, type KubeObject, type ResourceInfo } from "../api";
 import {
   deleteTarget,
@@ -168,9 +169,14 @@ export function DetailView(props: Props) {
             </button>
           )}
           {isRestartable(resource) && (
-            <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => restartTarget(target)}>
-              Restart
-            </button>
+            <>
+              <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => restartTarget(target)}>
+                Restart
+              </button>
+              <button className="btn btn-sm" title="Restart the same object in other clusters" onClick={() => restartAcrossDialog(target)}>
+                Restart Across Clusters
+              </button>
+            </>
           )}
           {compact && (
             <button className="btn btn-icon btn-sm" title="Open in new tab" onClick={() => openDetail(target, { view })}>
