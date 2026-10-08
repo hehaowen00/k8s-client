@@ -4,7 +4,16 @@ import { listen } from "@tauri-apps/api/event";
 import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, type FolderInfo } from "../api";
-import { EMPTY_CLUSTER, NO_MCP, bumpContexts, useContexts, useSettings, type ClusterSettings, type McpAccess, type Settings } from "../settings";
+import {
+  EMPTY_CLUSTER,
+  NO_MCP,
+  bumpContexts,
+  useContexts,
+  useSettings,
+  type ClusterSettings,
+  type McpAccess,
+  type Settings,
+} from "../settings";
 import { useDiscovery, useNamespaces } from "../hooks";
 import { backToHome, contextColor, contextLabel, type Tab } from "../store";
 import { alertDialog, toast } from "../components/Dialogs";
@@ -13,6 +22,7 @@ import { useExtensions } from "../extensions";
 import { Checkbox } from "../components/Checkbox";
 import { Select } from "../components/Select";
 import { iconDataUrl } from "../clusterIcon";
+import { S } from "../strings";
 
 const COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
 
@@ -29,7 +39,17 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
 }
 
 /** Text input that commits on blur / Enter instead of every keystroke. */
-function CommitInput({ value, onCommit, placeholder, className }: { value: string; onCommit: (v: string) => void; placeholder?: string; className?: string }) {
+function CommitInput({
+  value,
+  onCommit,
+  placeholder,
+  className,
+}: {
+  value: string;
+  onCommit: (v: string) => void;
+  placeholder?: string;
+  className?: string;
+}) {
   const [v, setV] = useState(value);
   useEffect(() => setV(value), [value]);
   return (
@@ -54,21 +74,21 @@ export function SettingsView() {
     api.listKubeconfigFolders().then(setFolders, () => {});
   }, [settings?.kubeconfigFolders]);
 
-  if (!settings) return <div className="empty">Loading settings…</div>;
+  if (!settings) return <div className="empty">{S.settings.loading}</div>;
   const set = (patch: Partial<Settings>) => save({ ...settings, ...patch }).catch((e) => toast(String(e), "bad"));
 
   return (
     <div className="settings-view">
       <div className="settings-inner">
-        <h1>Settings</h1>
+        <h1>{S.settings.title}</h1>
 
         <section className="settings-section">
-          <h2>Appearance</h2>
-          <Field label="Theme">
+          <h2>{S.settings.appearance}</h2>
+          <Field label={S.settings.theme}>
             <div className="segmented">
               {(["system", "dark", "light"] as const).map((t) => (
                 <button key={t} className={settings.theme === t ? "active" : ""} onClick={() => set({ theme: t })}>
-                  {t[0].toUpperCase() + t.slice(1)}
+                  {S.settings.themes[t]}
                 </button>
               ))}
             </div>
@@ -76,27 +96,31 @@ export function SettingsView() {
         </section>
 
         <section className="settings-section">
-          <h2>Kubeconfig</h2>
-          <Field label="Sources" hint="Changes to these files are picked up automatically">
+          <h2>{S.settings.kubeconfig}</h2>
+          <Field label={S.settings.sources} hint={S.settings.sourcesHint}>
             <div className="folders">
               <div className="folder-row">
                 <span className="mono small">$KUBECONFIG / ~/.kube/config</span>
-                <span className="muted small">always loaded</span>
+                <span className="muted small">{S.home.alwaysLoaded}</span>
               </div>
               {folders.map((f) => (
                 <div key={f.path} className="folder-row">
                   <span className="mono small" title={f.path}>
-                    {f.managed ? "Added in Kube Portal" : f.path}
+                    {f.managed ? S.home.addedInApp : f.path}
                   </span>
-                  <span className="muted small">
-                    {f.contexts} context{f.contexts === 1 ? "" : "s"}
-                  </span>
+                  <span className="muted small">{S.settings.contextCount(f.contexts)}</span>
                   {!f.managed && (
                     <button
                       className="btn btn-xs btn-ghost"
-                      onClick={() => api.removeKubeconfigFolder(f.path).then(setFolders).then(bumpContexts).then(() => useSettings.getState().load())}
+                      onClick={() =>
+                        api
+                          .removeKubeconfigFolder(f.path)
+                          .then(setFolders)
+                          .then(bumpContexts)
+                          .then(() => useSettings.getState().load())
+                      }
                     >
-                      Remove
+                      {S.common.remove}
                     </button>
                   )}
                 </div>
@@ -105,7 +129,7 @@ export function SettingsView() {
             <button
               className="btn btn-sm"
               onClick={async () => {
-                const path = await openDialog({ directory: true, title: "Choose a folder of kubeconfig files" });
+                const path = await openDialog({ directory: true, title: S.home.chooseFolder });
                 if (typeof path !== "string") return;
                 try {
                   setFolders(await api.addKubeconfigFolder(path));
@@ -116,7 +140,7 @@ export function SettingsView() {
                 }
               }}
             >
-              + Add folder
+              {S.home.addFolder}
             </button>
           </Field>
         </section>
@@ -124,15 +148,27 @@ export function SettingsView() {
         <McpSection settings={settings} set={set} />
 
         <section className="settings-section">
-          <h2>Tools</h2>
-          <Field label="Helm binary" hint="Leave empty to use helm from PATH">
-            <CommitInput className="wide-input" value={settings.helmPath ?? ""} placeholder="helm" onCommit={(v) => set({ helmPath: v.trim() || null })} />
+          <h2>{S.home.tools}</h2>
+          <Field label={S.settings.helmBinary} hint={S.settings.helmBinaryHint}>
+            <CommitInput
+              className="wide-input"
+              value={settings.helmPath ?? ""}
+              placeholder="helm"
+              onCommit={(v) => set({ helmPath: v.trim() || null })}
+            />
           </Field>
-          <Field label="kubectl binary" hint="Put first on PATH in terminals; overrides the automatic download">
-            <CommitInput className="wide-input" value={settings.kubectlPath ?? ""} placeholder="kubectl" onCommit={(v) => set({ kubectlPath: v.trim() || null })} />
+          <Field label={S.settings.kubectlBinary} hint={S.settings.kubectlBinaryHint}>
+            <CommitInput
+              className="wide-input"
+              value={settings.kubectlPath ?? ""}
+              placeholder="kubectl"
+              onCommit={(v) => set({ kubectlPath: v.trim() || null })}
+            />
           </Field>
-          <Field label="Per-cluster kubectl" hint="Download (and verify) the kubectl release matching each cluster's version for its terminals">
-            <Checkbox checked={settings.kubectlAuto} onChange={(e) => set({ kubectlAuto: e.target.checked })}>Match cluster version</Checkbox>
+          <Field label={S.settings.kubectlAuto} hint={S.settings.kubectlAutoHint}>
+            <Checkbox checked={settings.kubectlAuto} onChange={(e) => set({ kubectlAuto: e.target.checked })}>
+              {S.settings.kubectlAutoLabel}
+            </Checkbox>
           </Field>
         </section>
 
@@ -141,11 +177,16 @@ export function SettingsView() {
         <UpdatesSection settings={settings} set={set} />
 
         <section className="settings-section">
-          <h2>Terminal</h2>
-          <Field label="Shell" hint="Empty = $SHELL">
-            <CommitInput className="wide-input" value={settings.terminalShell ?? ""} placeholder="$SHELL" onCommit={(v) => set({ terminalShell: v.trim() || null })} />
+          <h2>{S.clusterView.terminal}</h2>
+          <Field label={S.settings.shell} hint={S.settings.shellHint}>
+            <CommitInput
+              className="wide-input"
+              value={settings.terminalShell ?? ""}
+              placeholder="$SHELL"
+              onCommit={(v) => set({ terminalShell: v.trim() || null })}
+            />
           </Field>
-          <Field label="Font size">
+          <Field label={S.settings.fontSize}>
             <input
               className="input narrow-input"
               type="number"
@@ -167,17 +208,18 @@ export function ClusterSettingsView({ tab }: { tab: Extract<Tab, { kind: "cluste
   const save = useSettings((s) => s.save);
   const cluster = tab.context;
 
-  if (!settings) return <div className="empty">Loading settings…</div>;
+  if (!settings) return <div className="empty">{S.settings.loading}</div>;
   const set = (patch: Partial<Settings>) => save({ ...settings, ...patch }).catch((e) => toast(String(e), "bad"));
   const cs: ClusterSettings = settings.clusters[cluster] || EMPTY_CLUSTER;
-  const setCluster_ = (patch: Partial<ClusterSettings>) => set({ clusters: { ...settings.clusters, [cluster]: { ...cs, ...patch } } });
+  const setCluster_ = (patch: Partial<ClusterSettings>) =>
+    set({ clusters: { ...settings.clusters, [cluster]: { ...cs, ...patch } } });
 
   return (
     <div className="settings-view">
       <div className="settings-inner">
         {tab.fromHome && (
           <button className="btn btn-xs btn-ghost settings-back" onClick={() => backToHome(tab.id)}>
-            ← New Tab
+            {S.settings.backToNewTab}
           </button>
         )}
         <h1>
@@ -185,31 +227,39 @@ export function ClusterSettingsView({ tab }: { tab: Extract<Tab, { kind: "cluste
           {contextLabel(cluster) !== cluster && <span className="muted small"> {cluster}</span>}
         </h1>
         <section className="settings-section">
-          <h2>General</h2>
-          <Field label="Display name" hint="Shown on tabs, cards and the hotbar">
-            <CommitInput value={cs.displayName ?? ""} placeholder={cluster} onCommit={(v) => setCluster_({ displayName: v.trim() || null })} />
+          <h2>{S.settings.general}</h2>
+          <Field label={S.settings.displayName} hint={S.settings.displayNameHint}>
+            <CommitInput
+              value={cs.displayName ?? ""}
+              placeholder={cluster}
+              onCommit={(v) => setCluster_({ displayName: v.trim() || null })}
+            />
           </Field>
-          <Field label="Colour">
+          <Field label={S.settings.colour}>
             <div className="swatches">
               {COLORS.map((c) => (
                 <button
                   key={c}
                   className={`swatch ${cs.color === c ? "active" : ""}`}
                   style={{ background: c }}
-                  aria-label={`Colour ${c}`}
+                  aria-label={S.settings.colourAria(c)}
                   onClick={() => setCluster_({ color: c })}
                 />
               ))}
               <button className="btn btn-xs btn-ghost" onClick={() => setCluster_({ color: null })}>
-                Auto
+                {S.settings.auto}
               </button>
-              <span className="swatch preview" style={{ background: contextColor(cluster) }} title="Current" />
+              <span
+                className="swatch preview"
+                style={{ background: contextColor(cluster) }}
+                title={S.settings.currentColour}
+              />
             </div>
           </Field>
-          <Field label="Icon" hint="Image shown instead of the colour">
+          <Field label={S.settings.icon} hint={S.settings.iconHint}>
             <div className="swatches">
               <label className="btn btn-xs">
-                Choose image
+                {S.settings.chooseImage}
                 <input
                   type="file"
                   accept="image/*"
@@ -222,7 +272,10 @@ export function ClusterSettingsView({ tab }: { tab: Extract<Tab, { kind: "cluste
                       setCluster_({ icon: await iconDataUrl(file) });
                     } catch (err) {
                       console.error("icon decode failed", file.type, err);
-                      alertDialog("Couldn't read that image", `${file.name} (${file.type || "unknown type"}, ${file.size} bytes)\n\n${err}`);
+                      alertDialog(
+                        S.cluster.iconReadFailed,
+                        S.cluster.iconReadFailedDetail(file.name, file.type, file.size, String(err)),
+                      );
                     } finally {
                       input.value = "";
                     }
@@ -231,22 +284,28 @@ export function ClusterSettingsView({ tab }: { tab: Extract<Tab, { kind: "cluste
               </label>
               {cs.icon && (
                 <button className="btn btn-xs btn-ghost" onClick={() => setCluster_({ icon: null })}>
-                  Remove
+                  {S.common.remove}
                 </button>
               )}
             </div>
           </Field>
-          <Field label="Pin to hotbar">
-            <Checkbox checked={cs.pinned} onChange={(e) => setCluster_({ pinned: e.target.checked })}>Pinned</Checkbox>
+          <Field label={S.settings.pinToHotbar}>
+            <Checkbox checked={cs.pinned} onChange={(e) => setCluster_({ pinned: e.target.checked })}>
+              {S.home.pinned}
+            </Checkbox>
           </Field>
-          <Field label="Default namespace" hint="Selected when opening this cluster; * = all namespaces">
-            <CommitInput value={cs.defaultNamespace ?? ""} placeholder="none (pick when opening)" onCommit={(v) => setCluster_({ defaultNamespace: v.trim() || null })} />
+          <Field label={S.settings.defaultNamespace} hint={S.settings.defaultNamespaceHint}>
+            <CommitInput
+              value={cs.defaultNamespace ?? ""}
+              placeholder={S.settings.defaultNamespacePlaceholder}
+              onCommit={(v) => setCluster_({ defaultNamespace: v.trim() || null })}
+            />
           </Field>
-          <Field label="Accessible namespaces" hint="Comma-separated; for users who can't list namespaces">
+          <Field label={S.settings.accessibleNamespaces} hint={S.settings.accessibleNamespacesHint}>
             <CommitInput
               className="wide-input"
               value={cs.accessibleNamespaces.join(", ")}
-              placeholder="e.g. team-a, team-a-staging"
+              placeholder={S.settings.accessibleNamespacesPlaceholder}
               onCommit={(v) =>
                 setCluster_({
                   accessibleNamespaces: v
@@ -257,13 +316,18 @@ export function ClusterSettingsView({ tab }: { tab: Extract<Tab, { kind: "cluste
               }
             />
           </Field>
-          <Field label="Proxy" hint="http://, https:// or socks5:// — used for the API server, Helm and terminals">
-            <CommitInput className="wide-input" value={cs.proxyUrl ?? ""} placeholder="none" onCommit={(v) => setCluster_({ proxyUrl: v.trim() || null })} />
+          <Field label={S.settings.proxy} hint={S.settings.proxyHint}>
+            <CommitInput
+              className="wide-input"
+              value={cs.proxyUrl ?? ""}
+              placeholder={S.settings.none}
+              onCommit={(v) => setCluster_({ proxyUrl: v.trim() || null })}
+            />
           </Field>
         </section>
 
         <section className="settings-section">
-          <h2>MCP access</h2>
+          <h2>{S.settings.mcpAccess}</h2>
           <McpClusterAccess cluster={cluster} value={cs.mcp ?? NO_MCP} onChange={(mcp) => setCluster_({ mcp })} />
         </section>
       </div>
@@ -310,11 +374,11 @@ function UpdatesSection({ settings, set }: { settings: Settings; set: (p: Partia
   };
   return (
     <section className="settings-section">
-      <h2>Updates</h2>
-      <Field label="Current version">
+      <h2>{S.settings.updates}</h2>
+      <Field label={S.settings.currentVersion}>
         <span className="mono">{version}</span>
       </Field>
-      <Field label="Update feed" hint="URL of latest.json from your signed releases (e.g. a GitHub release asset)">
+      <Field label={S.settings.updateFeed} hint={S.settings.updateFeedHint}>
         <CommitInput
           className="wide-input"
           value={settings.updateEndpoint ?? ""}
@@ -322,24 +386,33 @@ function UpdatesSection({ settings, set }: { settings: Settings; set: (p: Partia
           onCommit={(v) => set({ updateEndpoint: v.trim() || null })}
         />
       </Field>
-      <Field label="Public key" hint="Contents of the .pub file from `tauri signer generate`">
-        <CommitInput className="wide-input" value={settings.updatePubkey ?? ""} placeholder="dW50cnVzdGVkIGNvbW1lbnQ6…" onCommit={(v) => set({ updatePubkey: v.trim() || null })} />
+      <Field label={S.settings.publicKey} hint={S.settings.publicKeyHint}>
+        <CommitInput
+          className="wide-input"
+          value={settings.updatePubkey ?? ""}
+          placeholder="dW50cnVzdGVkIGNvbW1lbnQ6…"
+          onCommit={(v) => set({ updatePubkey: v.trim() || null })}
+        />
       </Field>
       <Field label="">
         <div className="update-row">
-          <button className="btn btn-sm" disabled={state.kind === "checking" || state.kind === "installing"} onClick={check}>
-            {state.kind === "checking" ? "Checking…" : "Check for updates"}
+          <button
+            className="btn btn-sm"
+            disabled={state.kind === "checking" || state.kind === "installing"}
+            onClick={check}
+          >
+            {state.kind === "checking" ? S.restartAcross.checking : S.settings.checkForUpdates}
           </button>
-          {state.kind === "none" && <span className="tone-ok small">You're up to date</span>}
+          {state.kind === "none" && <span className="tone-ok small">{S.settings.upToDate}</span>}
           {state.kind === "available" && (
             <>
-              <span className="small">Version {state.version} is available</span>
+              <span className="small">{S.settings.updateAvailable(state.version)}</span>
               <button className="btn btn-sm btn-primary" onClick={install}>
-                Install and restart
+                {S.settings.installAndRestart}
               </button>
             </>
           )}
-          {state.kind === "installing" && <span className="small">Downloading{state.pct !== null ? ` ${state.pct}%` : "…"}</span>}
+          {state.kind === "installing" && <span className="small">{S.settings.downloading(state.pct)}</span>}
           {state.kind === "error" && <span className="tone-bad small">{state.message}</span>}
         </div>
         {state.kind === "available" && state.notes && <pre className="data-val">{state.notes}</pre>}
@@ -355,23 +428,26 @@ function ExtensionsSection() {
   const enabled = (id: string, dflt: boolean) => state[id] ?? dflt;
   return (
     <section className="settings-section">
-      <h2>Extensions</h2>
-      <Field label="Installed" hint="Extensions run with full access to Kube Portal and your clusters — only install ones you trust">
+      <h2>{S.palette.extensions}</h2>
+      <Field label={S.settings.installed} hint={S.settings.installedHint}>
         {extensions.length === 0 ? (
-          <span className="muted small">No extensions installed. Put an extension folder (with index.js) in the extensions folder.</span>
+          <span className="muted small">{S.settings.noExtensions}</span>
         ) : (
           <div className="folders">
             {extensions.map((x) => (
               <div key={x.id} className="folder-row">
                 <Checkbox
                   checked={enabled(x.id, x.enabled)}
-                  aria-label={`Enable ${x.name}`}
+                  aria-label={S.settings.enableExtension(x.name)}
                   onChange={async (e) => {
-                      const on = e.target.checked;
-                      setState({ ...state, [x.id]: on });
-                      await invoke("set_extension_enabled", { id: x.id, enabled: on }).catch((err) => toast(String(err), "bad"));
-                      setChanged(true);
-                    }} />
+                    const on = e.target.checked;
+                    setState({ ...state, [x.id]: on });
+                    await invoke("set_extension_enabled", { id: x.id, enabled: on }).catch((err) =>
+                      toast(String(err), "bad"),
+                    );
+                    setChanged(true);
+                  }}
+                />
                 <span className="ext-meta">
                   <strong>{x.name}</strong> <span className="muted small">{x.version}</span>
                   {x.description && <div className="muted small">{x.description}</div>}
@@ -392,12 +468,12 @@ function ExtensionsSection() {
               }
             }}
           >
-            Open extensions folder
+            {S.settings.openExtensionsFolder}
           </button>
           <button className="btn btn-sm" onClick={() => location.reload()}>
-            Reload extensions
+            {S.settings.reloadExtensions}
           </button>
-          {changed && <span className="muted small">Reload to apply changes</span>}
+          {changed && <span className="muted small">{S.settings.reloadToApply}</span>}
         </div>
       </Field>
     </section>
@@ -428,9 +504,14 @@ function Checklist({
   const chosen = new Set(selected);
   return (
     <>
-      <input className="input wide-input" placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <input
+        className="input wide-input"
+        placeholder={S.common.filter}
+        value={filter}
+        onChange={(e) => setFilter(e.target.value)}
+      />
       <div className="folders mcp-resources">
-        {loading && <div className="folder-row muted small">Loading…</div>}
+        {loading && <div className="folder-row muted small">{S.settings.loadingList}</div>}
         {error && <div className="folder-row small">{error}</div>}
         {shown.map((id) => (
           <div key={id} className="folder-row">
@@ -447,15 +528,18 @@ function Checklist({
       <div className="swatches">
         {allowAdd && q && !items.includes(filter.trim()) && (
           <button className="btn btn-xs" onClick={() => (onChange([...selected, filter.trim()]), setFilter(""))}>
-            Add {filter.trim()}
+            {S.settings.addItem(filter.trim())}
           </button>
         )}
         <button className="btn btn-xs" onClick={() => onChange([...new Set([...selected, ...shown])])}>
-          Select {q ? "Shown" : "All"}
+          {q ? S.settings.selectShown : S.common.selectAll}
         </button>
         {!locked && (
-          <button className="btn btn-xs btn-ghost" onClick={() => onChange(q ? selected.filter((x) => !shown.includes(x)) : [])}>
-            Clear {q ? "Shown" : "All"}
+          <button
+            className="btn btn-xs btn-ghost"
+            onClick={() => onChange(q ? selected.filter((x) => !shown.includes(x)) : [])}
+          >
+            {q ? S.settings.clearShown : S.common.clearAll}
           </button>
         )}
       </div>
@@ -464,7 +548,15 @@ function Checklist({
 }
 
 /** Per-cluster MCP sharing: which resource types, namespaces and data. */
-function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value: McpAccess; onChange: (v: McpAccess) => void }) {
+function McpClusterAccess({
+  cluster,
+  value,
+  onChange,
+}: {
+  cluster: string;
+  value: McpAccess;
+  onChange: (v: McpAccess) => void;
+}) {
   const set = (p: Partial<McpAccess>) => onChange({ ...value, ...p });
   const discovery = useDiscovery(value.enabled ? cluster : null);
   const namespaces = useNamespaces(value.enabled ? cluster : null);
@@ -472,18 +564,21 @@ function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value
     const found = (discovery.data ?? []).map((r) => (r.group ? `${r.plural}.${r.group}` : r.plural));
     return [...new Set([...value.resources, ...found])].sort();
   }, [discovery.data, value.resources]);
-  const namespaceIds = useMemo(() => [...new Set([...value.namespaces, ...(namespaces.data ?? [])])].sort(), [namespaces.data, value.namespaces]);
+  const namespaceIds = useMemo(
+    () => [...new Set([...value.namespaces, ...(namespaces.data ?? [])])].sort(),
+    [namespaces.data, value.namespaces],
+  );
   const [restrict, setRestrict] = useState(value.namespaces.length > 0);
   return (
     <>
-      <Field label="MCP access" hint="What AI assistants connected to Kube Portal's MCP server can read. Nothing is shared by default">
+      <Field label={S.settings.mcpAccess} hint={S.settings.mcpAccessHint}>
         <Checkbox checked={value.enabled} onChange={(e) => set({ enabled: e.target.checked })}>
-          Share this cluster
+          {S.settings.shareCluster}
         </Checkbox>
       </Field>
       {value.enabled && (
         <>
-          <Field label="Resource types" hint={`${value.resources.length} shared, as kubectl-style tables`}>
+          <Field label={S.settings.resourceTypes} hint={S.settings.resourceTypesHint(value.resources.length)}>
             <Checklist
               items={resourceIds}
               selected={value.resources}
@@ -493,8 +588,14 @@ function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value
             />
           </Field>
           <Field
-            label="MCP namespaces"
-            hint={!restrict ? "All namespaces are shared" : value.namespaces.length ? `${value.namespaces.length} shared` : "Add a namespace; until then all are shared"}
+            label={S.settings.mcpNamespaces}
+            hint={
+              !restrict
+                ? S.settings.allNamespacesShared
+                : value.namespaces.length
+                  ? S.settings.nShared(value.namespaces.length)
+                  : S.settings.addNamespaceHint
+            }
           >
             <Checkbox
               checked={!restrict}
@@ -503,7 +604,7 @@ function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value
                 set({ namespaces: e.target.checked ? [] : namespaceIds });
               }}
             >
-              All namespaces
+              {S.ns.all}
             </Checkbox>
             {restrict && (
               <Checklist
@@ -517,15 +618,15 @@ function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value
               />
             )}
           </Field>
-          <Field label="MCP data" hint="Without these, only table rows (what kubectl get shows) are shared">
+          <Field label={S.settings.mcpData} hint={S.settings.mcpDataHint}>
             <Checkbox checked={value.objects} onChange={(e) => set({ objects: e.target.checked })}>
-              Full objects (YAML; Secret values are always redacted)
+              {S.settings.mcpObjects}
             </Checkbox>
             <Checkbox checked={value.logs} onChange={(e) => set({ logs: e.target.checked })}>
-              Pod and deployment logs
+              {S.settings.mcpLogs}
             </Checkbox>
             <Checkbox checked={value.events} onChange={(e) => set({ events: e.target.checked })}>
-              Events
+              {S.settings.mcpEvents}
             </Checkbox>
           </Field>
         </>
@@ -535,12 +636,12 @@ function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value
 }
 
 const MCP_TOOLS = [
-  { name: "list_clusters", label: "List Clusters", hint: "Shared clusters and what each allows" },
-  { name: "list_resources", label: "List Resources", hint: "kubectl get tables of shared resource types" },
-  { name: "get_resource", label: "Get Resource", hint: "Full YAML of one object, where full objects are shared" },
-  { name: "get_deployment", label: "Get Deployment", hint: "Deployment status and its pods, where deployments.apps is shared" },
-  { name: "get_logs", label: "Get Logs", hint: "Pod or deployment logs, where logs are shared" },
-  { name: "list_events", label: "List Events", hint: "Events, where events are shared" },
+  { name: "list_clusters", ...S.settings.mcpTools.listClusters },
+  { name: "list_resources", ...S.settings.mcpTools.listResources },
+  { name: "get_resource", ...S.settings.mcpTools.getResource },
+  { name: "get_deployment", ...S.settings.mcpTools.getDeployment },
+  { name: "get_logs", ...S.settings.mcpTools.getLogs },
+  { name: "list_events", ...S.settings.mcpTools.listEvents },
 ];
 
 interface McpStatus {
@@ -568,7 +669,10 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
     const refresh = () => invoke<McpStatus>("mcp_status").then(setStatus, () => {});
     refresh();
     invoke<McpAccessEntry[]>("mcp_access_log").then(setLog, () => {});
-    const un = [listen("mcp-status", refresh), listen<McpAccessEntry>("mcp-access", (e) => setLog((l) => [...l.slice(-499), e.payload]))];
+    const un = [
+      listen("mcp-status", refresh),
+      listen<McpAccessEntry>("mcp-access", (e) => setLog((l) => [...l.slice(-499), e.payload])),
+    ];
     return () => un.forEach((p) => p.then((f) => f()));
   }, []);
 
@@ -577,46 +681,58 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
   const shared = Object.entries(settings.clusters).filter(([, c]) => c.mcp?.enabled);
   const cluster = picked ?? shared[0]?.[0] ?? contexts.data?.[0]?.name ?? null;
   const cs = cluster ? settings.clusters[cluster] || EMPTY_CLUSTER : null;
-  const copy = (text: string) => navigator.clipboard.writeText(text).then(() => toast("Copied"));
+  const copy = (text: string) => navigator.clipboard.writeText(text).then(() => toast(S.common.copied));
   const claudeCmd = `claude mcp add --transport http kube-portal ${url} --header "Authorization: Bearer ${token}"`;
-  const jsonConfig = JSON.stringify({ mcpServers: { "kube-portal": { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
+  const jsonConfig = JSON.stringify(
+    { mcpServers: { "kube-portal": { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } },
+    null,
+    2,
+  );
 
   return (
     <section className="settings-section">
-      <h2>MCP server</h2>
-      <Field label="Server" hint="Read-only, on this machine only (127.0.0.1), while Kube Portal is open">
+      <h2>{S.settings.mcpServer}</h2>
+      <Field label={S.settings.server} hint={S.settings.serverHint}>
         <Checkbox checked={settings.mcpEnabled} onChange={(e) => set({ mcpEnabled: e.target.checked })}>
-          Enable MCP server
+          {S.settings.enableMcp}
         </Checkbox>
-        {status?.running && <span className="muted small">Listening on <span className="mono">{status.url}</span></span>}
+        {status?.running && (
+          <span className="muted small">
+            {S.settings.listeningOn} <span className="mono">{status.url}</span>
+          </span>
+        )}
         {status?.error && <span className="small mcp-bad">{status.error}</span>}
       </Field>
-      <Field label="Port">
+      <Field label={S.settings.port}>
         <CommitInput
           className="narrow-input"
           value={String(settings.mcpPort)}
           onCommit={(v) => {
             const n = Number(v);
             if (Number.isInteger(n) && n >= 1024 && n <= 65535) set({ mcpPort: n });
-            else toast("Port must be 1024–65535", "bad");
+            else toast(S.settings.badPort, "bad");
           }}
         />
       </Field>
-      <Field label="Tools" hint="Turned-off tools are hidden from clients and refused">
+      <Field label={S.settings.tools} hint={S.settings.toolsHint}>
         {MCP_TOOLS.map((t) => (
           <Checkbox
             key={t.name}
             checked={!settings.mcpDisabledTools.includes(t.name)}
             title={t.hint}
             onChange={(e) =>
-              set({ mcpDisabledTools: e.target.checked ? settings.mcpDisabledTools.filter((n) => n !== t.name) : [...settings.mcpDisabledTools, t.name] })
+              set({
+                mcpDisabledTools: e.target.checked
+                  ? settings.mcpDisabledTools.filter((n) => n !== t.name)
+                  : [...settings.mcpDisabledTools, t.name],
+              })
             }
           >
             {t.label} <span className="mono small muted">{t.name}</span>
           </Checkbox>
         ))}
       </Field>
-      <Field label="Shared clusters">
+      <Field label={S.settings.sharedClusters}>
         <span className="small">
           {shared.length ? (
             shared.map(([id]) => (
@@ -625,11 +741,11 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
               </button>
             ))
           ) : (
-            <span className="muted">None yet</span>
+            <span className="muted">{S.settings.noneYet}</span>
           )}
         </span>
       </Field>
-      <Field label="Cluster" hint="Choose a cluster to set what it shares">
+      <Field label={S.settings.cluster} hint={S.settings.clusterHint}>
         <Select className="select" value={cluster ?? ""} onChange={(e) => setPicked(e.target.value)}>
           {contexts.data?.map((c) => (
             <option key={c.name} value={c.name} title={c.name}>
@@ -639,44 +755,54 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
         </Select>
       </Field>
       {cluster && cs && (
-        <McpClusterAccess key={cluster} cluster={cluster} value={cs.mcp ?? NO_MCP} onChange={(mcp) => set({ clusters: { ...settings.clusters, [cluster]: { ...cs, mcp } } })} />
+        <McpClusterAccess
+          key={cluster}
+          cluster={cluster}
+          value={cs.mcp ?? NO_MCP}
+          onChange={(mcp) => set({ clusters: { ...settings.clusters, [cluster]: { ...cs, mcp } } })}
+        />
       )}
       {settings.mcpEnabled && token && (
-        <Field label="Connect a client" hint="Anyone with the token can read what you share">
+        <Field label={S.settings.connectClient} hint={S.settings.connectClientHint}>
           <div className="swatches">
             <span className="mono small">{showToken ? token : "•".repeat(16)}</span>
             <button className="btn btn-xs btn-ghost" onClick={() => setShowToken((v) => !v)}>
-              {showToken ? "Hide" : "Show"}
+              {showToken ? S.settings.hide : S.settings.show}
             </button>
             <button
               className="btn btn-xs btn-ghost"
-              onClick={() => invoke("mcp_regenerate_token").then(() => useSettings.getState().load(), (e) => toast(String(e), "bad"))}
+              onClick={() =>
+                invoke("mcp_regenerate_token").then(
+                  () => useSettings.getState().load(),
+                  (e) => toast(String(e), "bad"),
+                )
+              }
             >
-              Regenerate
+              {S.settings.regenerate}
             </button>
           </div>
           <div className="swatches">
             <button className="btn btn-xs" onClick={() => copy(claudeCmd)}>
-              Copy Claude Code command
+              {S.settings.copyClaudeCommand}
             </button>
             <button className="btn btn-xs" onClick={() => copy(jsonConfig)}>
-              Copy JSON config
+              {S.settings.copyJsonConfig}
             </button>
           </div>
         </Field>
       )}
-      <Field label="Access log" hint="Every MCP request since Kube Portal started (last 500)">
+      <Field label={S.settings.accessLog} hint={S.settings.accessLogHint}>
         {log.length ? (
           <>
             <div className="mcp-log">
               <table>
                 <thead>
                   <tr>
-                    <th>Time</th>
-                    <th>Cluster</th>
-                    <th>Tool</th>
-                    <th>Target</th>
-                    <th>Result</th>
+                    <th>{S.settings.colTime}</th>
+                    <th>{S.portForward.colCluster}</th>
+                    <th>{S.settings.colTool}</th>
+                    <th>{S.portForward.colTarget}</th>
+                    <th>{S.settings.colResult}</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -693,11 +819,11 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
               </table>
             </div>
             <button className="btn btn-xs btn-ghost" onClick={() => invoke("mcp_clear_log").then(() => setLog([]))}>
-              Clear
+              {S.logs.clear}
             </button>
           </>
         ) : (
-          <span className="muted small">No requests yet</span>
+          <span className="muted small">{S.settings.noRequests}</span>
         )}
       </Field>
     </section>

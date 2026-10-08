@@ -50,7 +50,9 @@ const TabContent = memo(function TabContent({ tab, active }: { tab: Tab; active:
 });
 
 export default function App() {
-  const { tabs, activeId, splitId } = useTabs(useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, splitId: s.splitId })));
+  const { tabs, activeId, splitId } = useTabs(
+    useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, splitId: s.splitId })),
+  );
   const open = useTabs((s) => s.open);
   const close = useTabs((s) => s.close);
   const cycle = useTabs((s) => s.cycle);
@@ -92,7 +94,13 @@ export default function App() {
       // A held key fires once (holding Cmd+W shouldn't close tab after tab); tab switching may repeat.
       if (e.repeat && !switching) return;
       // On Windows the modifier is Ctrl, which shells need (Ctrl+W, Ctrl+K…); in a terminal only Super and tab switching are the app's.
-      if (platform === "windows" && !e.metaKey && !switching && (e.target as Element | null)?.closest?.(".terminal-host")) return;
+      if (
+        platform === "windows" &&
+        !e.metaKey &&
+        !switching &&
+        (e.target as Element | null)?.closest?.(".terminal-host")
+      )
+        return;
       const { tabs, activeId } = useTabs.getState();
       if ((e.key === "P" || e.key === "p") && e.shiftKey) {
         e.preventDefault();
@@ -146,15 +154,21 @@ export default function App() {
           {tabs.map((t) => {
             const left = t.id === activeId;
             const right = t.id === split;
-            const style: React.CSSProperties = !left && !right
-              ? { display: "none" }
-              : split
-                ? left
-                  ? { display: "flex", right: `${(1 - splitRatio) * 100}%` }
-                  : { display: "flex", left: `${splitRatio * 100}%` }
-                : { display: "flex" };
+            const style: React.CSSProperties =
+              !left && !right
+                ? { display: "none" }
+                : split
+                  ? left
+                    ? { display: "flex", right: `${(1 - splitRatio) * 100}%` }
+                    : { display: "flex", left: `${splitRatio * 100}%` }
+                  : { display: "flex" };
             return (
-              <div key={t.id} className={`tab-panel ${right ? "split-pane" : ""}`} style={style} onMouseDown={() => right && activate(t.id)}>
+              <div
+                key={t.id}
+                className={`tab-panel ${right ? "split-pane" : ""}`}
+                style={style}
+                onMouseDown={() => right && activate(t.id)}
+              >
                 <TabContent tab={t} active={left || right} />
               </div>
             );

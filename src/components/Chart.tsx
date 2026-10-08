@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { MAX_BARS, type Point } from "../metrics";
+import { S } from "../strings";
 
 export interface RefLine {
   value: number;
@@ -152,7 +153,7 @@ export function BarChart({
           width={width}
           height={height}
           role="img"
-          aria-label={`${title}: ${latest !== null ? `latest ${format(latest)}` : "no data"}`}
+          aria-label={S.chart.aria(title, latest !== null ? format(latest) : null)}
           onPointerMove={onMove}
           onPointerLeave={() => setHover(null)}
         >
@@ -185,7 +186,13 @@ export function BarChart({
           })}
           {refs.map((r) => (
             <g key={r.label}>
-              <line className="chart-ref" x1={M.left} x2={M.left + geo.innerW} y1={geo.y(r.value)} y2={geo.y(r.value)} />
+              <line
+                className="chart-ref"
+                x1={M.left}
+                x2={M.left + geo.innerW}
+                y1={geo.y(r.value)}
+                y2={geo.y(r.value)}
+              />
               <text className="chart-ref-label" x={M.left + geo.innerW - 2} y={geo.y(r.value) - 4} textAnchor="end">
                 {r.label} {format(r.value)}
               </text>
@@ -193,7 +200,7 @@ export function BarChart({
           ))}
           <rect x={M.left} y={M.top} width={geo.innerW} height={geo.innerH} fill="transparent" />
         </svg>
-        {!points.length && <div className="chart-empty">{emptyText ?? "No data"}</div>}
+        {!points.length && <div className="chart-empty">{emptyText ?? S.common.noData}</div>}
         {hb && (
           <div className="chart-tip" style={{ left: tipLeft, top: 6 }}>
             <div className="muted small">
@@ -210,11 +217,23 @@ export function BarChart({
 }
 
 /** Horizontal meter: fill = used / total, severity colouring past thresholds. */
-export function Meter({ label, used, total, format, extra }: { label: string; used: number; total: number; format: (v: number) => string; extra?: string }) {
+export function Meter({
+  label,
+  used,
+  total,
+  format,
+  extra,
+}: {
+  label: string;
+  used: number;
+  total: number;
+  format: (v: number) => string;
+  extra?: string;
+}) {
   const pct = total > 0 ? Math.min(100, (used / total) * 100) : 0;
   const level = pct >= 90 ? "critical" : pct >= 75 ? "warning" : "normal";
   return (
-    <div className="meter" title={`${label}: ${format(used)} of ${format(total)}`}>
+    <div className="meter" title={S.chart.meterTitle(label, format(used), format(total))}>
       <div className="meter-head">
         <span>{label}</span>
         <span className="muted">

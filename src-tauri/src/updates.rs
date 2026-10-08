@@ -9,6 +9,7 @@ use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 use crate::state::{err, AppState, Result};
+use crate::strings;
 
 #[derive(Default)]
 pub struct PendingUpdate(pub Mutex<Option<Update>>);
@@ -23,14 +24,25 @@ pub struct UpdateInfo {
 }
 
 #[tauri::command]
-pub async fn update_check(app: AppHandle, state: State<'_, AppState>, pending: State<'_, PendingUpdate>) -> Result<Option<UpdateInfo>> {
+pub async fn update_check(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    pending: State<'_, PendingUpdate>,
+) -> Result<Option<UpdateInfo>> {
     let (endpoint, pubkey) = {
         let s = state.settings.lock().unwrap();
         (s.update_endpoint.clone(), s.update_pubkey.clone())
     };
-    let endpoint = endpoint.filter(|e| !e.trim().is_empty()).ok_or("set an update feed URL in Settings → Updates first")?;
-    let pubkey = pubkey.filter(|k| !k.trim().is_empty()).ok_or("set the updater public key in Settings → Updates first")?;
-    let url = endpoint.trim().parse().map_err(|e| format!("invalid update feed URL: {e}"))?;
+    let endpoint = endpoint
+        .filter(|e| !e.trim().is_empty())
+        .ok_or(strings::UPDATE_FEED_URL_MISSING)?;
+    let pubkey = pubkey
+        .filter(|k| !k.trim().is_empty())
+        .ok_or(strings::UPDATER_PUBKEY_MISSING)?;
+    let url = endpoint
+        .trim()
+        .parse()
+        .map_err(strings::invalid_update_feed_url)?;
     let updater = app
         .updater_builder()
         .pubkey(pubkey.trim())
@@ -52,7 +64,12 @@ pub async fn update_check(app: AppHandle, state: State<'_, AppState>, pending: S
 /// Download (signature-verified by the plugin), install, and restart.
 #[tauri::command]
 pub async fn update_install(app: AppHandle, pending: State<'_, PendingUpdate>) -> Result<()> {
-    let update = pending.0.lock().unwrap().take().ok_or("no update pending — check for updates first")?;
+    let update = pending
+        .0
+        .lock()
+        .unwrap()
+        .take()
+        .ok_or(strings::NO_UPDATE_PENDING)?;
     let mut downloaded = 0usize;
     let progress_app = app.clone();
     update

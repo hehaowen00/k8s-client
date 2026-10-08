@@ -18,7 +18,8 @@ const WORKLOADS = [
 
 // Pods carry containers directly; workloads under spec.template.
 const podSpecOf = (obj) => (obj.spec?.containers ? obj.spec : obj.spec?.template?.spec) ?? {};
-const imagesOf = (obj) => [...(podSpecOf(obj).initContainers ?? []), ...(podSpecOf(obj).containers ?? [])].map((c) => c.image);
+const imagesOf = (obj) =>
+  [...(podSpecOf(obj).initContainers ?? []), ...(podSpecOf(obj).containers ?? [])].map((c) => c.image);
 
 function el(tag, props = {}, ...children) {
   const e = Object.assign(document.createElement(tag), props);
@@ -75,10 +76,21 @@ export default function activate(kubetab) {
           "table",
           { className: "dtable" },
           el("thead", {}, el("tr", {}, el("th", { textContent: "Image" }), el("th", { textContent: "Pods" }))),
-          el("tbody", {}, ...rows.map(([img, n]) => el("tr", {}, el("td", { className: "mono", textContent: img }), el("td", { textContent: String(n) })))),
+          el(
+            "tbody",
+            {},
+            ...rows.map(([img, n]) =>
+              el("tr", {}, el("td", { className: "mono", textContent: img }), el("td", { textContent: String(n) })),
+            ),
+          ),
         );
-        root.replaceChildren(el("p", { className: "muted", textContent: `${rows.length} images across ${all.length} pods` }), table);
-      })().catch((e) => !cancelled && root.replaceChildren(el("div", { className: "error-box", textContent: String(e) })));
+        root.replaceChildren(
+          el("p", { className: "muted", textContent: `${rows.length} images across ${all.length} pods` }),
+          table,
+        );
+      })().catch(
+        (e) => !cancelled && root.replaceChildren(el("div", { className: "error-box", textContent: String(e) })),
+      );
       return () => {
         cancelled = true;
       };

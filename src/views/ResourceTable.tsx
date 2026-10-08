@@ -1,6 +1,17 @@
 import { isBackgroundClick } from "../keys";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, canDelete, isNode, isPod, isRestartable, isScalable, type Column, type Usage, type ResourceInfo, type Row } from "../api";
+import {
+  api,
+  canDelete,
+  isNode,
+  isPod,
+  isRestartable,
+  isScalable,
+  type Column,
+  type Usage,
+  type ResourceInfo,
+  type Row,
+} from "../api";
 import { deleteMany, restartMany, targetMenu } from "../actions";
 import { openContextMenu } from "../components/ContextMenu";
 import { formatAge, formatBytes, formatCpu, nsSelection, statusTone, useNow } from "../util";
@@ -9,6 +20,7 @@ import { useUsageMap } from "../metrics";
 import { useSettings } from "../settings";
 import { Checkbox } from "../components/Checkbox";
 import { loadPerms } from "../permissions";
+import { S } from "../strings";
 
 const BACKGROUND_WATCH_MS = 5 * 60_000;
 
@@ -69,7 +81,7 @@ function buildColumns(cols: Column[], showNamespace: boolean, wide: boolean, met
   });
   if (showNamespace && !out.some((c) => c.kind === "namespace")) {
     const nameIdx = out.findIndex((c) => c.kind === "name");
-    out.splice(nameIdx + 1, 0, { key: "ns", label: "Namespace", index: -1, kind: "namespace" });
+    out.splice(nameIdx + 1, 0, { key: "ns", label: S.field.namespace, index: -1, kind: "namespace" });
   }
   if (metrics) {
     // Live usage from metrics-server, just before Age like Lens.
@@ -78,8 +90,8 @@ function buildColumns(cols: Column[], showNamespace: boolean, wide: boolean, met
     out.splice(
       at,
       0,
-      { key: "cpu", label: "CPU", index: -1, kind: "cpu", description: "Current CPU usage (metrics-server)" },
-      { key: "mem", label: "Memory", index: -1, kind: "memory", description: "Current memory working set (metrics-server)" },
+      { key: "cpu", label: S.field.cpu, index: -1, kind: "cpu", description: S.table.cpuHint },
+      { key: "mem", label: S.field.memory, index: -1, kind: "memory", description: S.table.memoryHint },
     );
   }
   return out;
@@ -106,7 +118,12 @@ const haystacks = new WeakMap<Row, string>();
 function matches(row: Row, terms: string[]): boolean {
   let hay = haystacks.get(row);
   if (hay === undefined) {
-    hay = [row.name, row.namespace ?? "", ...row.cells.map(cellText), ...Object.entries(row.labels ?? {}).map(([k, v]) => `${k}=${v}`)]
+    hay = [
+      row.name,
+      row.namespace ?? "",
+      ...row.cells.map(cellText),
+      ...Object.entries(row.labels ?? {}).map(([k, v]) => `${k}=${v}`),
+    ]
       .join("\u0000")
       .toLowerCase();
     haystacks.set(row, hay);
@@ -205,13 +222,33 @@ export function ResourceTable(props: Props) {
       if (frame) cancelAnimationFrame(frame);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context, resource.group, resource.version, resource.plural, nsKey, props.labelSelector, props.fieldSelector, live]);
+  }, [
+    context,
+    resource.group,
+    resource.version,
+    resource.plural,
+    nsKey,
+    props.labelSelector,
+    props.fieldSelector,
+    live,
+  ]);
 
   const showNamespace = resource.namespaced && (sel.all || picked.length > 1);
-  const usage = useUsageMap(context, isPod(resource) ? "pods" : isNode(resource) ? "nodes" : null, nsList.includes(null) ? null : (nsList as string[]), props.active);
+  const usage = useUsageMap(
+    context,
+    isPod(resource) ? "pods" : isNode(resource) ? "nodes" : null,
+    nsList.includes(null) ? null : (nsList as string[]),
+    props.active,
+  );
   // Per-kind column layout: hidden columns and order, by label.
-  const [layout, setLayout] = usePref<{ hidden: string[]; order: string[] }>(`columns.${resource.group}/${resource.kind}`, { hidden: [], order: [] });
-  const allCols = useMemo(() => buildColumns(columns, showNamespace, wide, !!usage), [columns, showNamespace, wide, usage]);
+  const [layout, setLayout] = usePref<{ hidden: string[]; order: string[] }>(
+    `columns.${resource.group}/${resource.kind}`,
+    { hidden: [], order: [] },
+  );
+  const allCols = useMemo(
+    () => buildColumns(columns, showNamespace, wide, !!usage),
+    [columns, showNamespace, wide, usage],
+  );
   const displayCols = useMemo(() => {
     const visible = allCols.filter((c) => c.kind === "name" || !layout.hidden.includes(c.label));
     if (!layout.order.length) return visible;
@@ -231,11 +268,13 @@ export function ResourceTable(props: Props) {
           onClick: () =>
             setLayout({
               ...layout,
-              hidden: layout.hidden.includes(c.label) ? layout.hidden.filter((h) => h !== c.label) : [...layout.hidden, c.label],
+              hidden: layout.hidden.includes(c.label)
+                ? layout.hidden.filter((h) => h !== c.label)
+                : [...layout.hidden, c.label],
             }),
         })),
       { separator: true, label: "" },
-      { label: "Reset columns", onClick: () => setLayout({ hidden: [], order: [] }) },
+      { label: S.table.resetColumns, onClick: () => setLayout({ hidden: [], order: [] }) },
     ]);
 
   const visibleRows = useMemo(() => {
@@ -248,12 +287,15 @@ export function ResourceTable(props: Props) {
       // Compute each row's sort value once rather than in every comparison.
       const keyed = filtered.map((row) => ({ row, v: sortValue(row, col, usage) }));
       keyed.sort((a, b) => {
-        const c = typeof a.v === "number" && typeof b.v === "number" ? a.v - b.v : collator.compare(String(a.v), String(b.v));
+        const c =
+          typeof a.v === "number" && typeof b.v === "number" ? a.v - b.v : collator.compare(String(a.v), String(b.v));
         return c * sort.dir || collator.compare(a.row.name, b.row.name);
       });
       rows = keyed.map((k) => k.row);
     } else {
-      rows = filtered.sort((a, b) => collator.compare(a.namespace ?? "", b.namespace ?? "") || collator.compare(a.name, b.name));
+      rows = filtered.sort(
+        (a, b) => collator.compare(a.namespace ?? "", b.namespace ?? "") || collator.compare(a.name, b.name),
+      );
     }
     return { rows, total: all.length };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -311,7 +353,9 @@ export function ResourceTable(props: Props) {
     const rows = visibleRows.rows;
     let idx = selectedUid ? rows.findIndex((r) => r.uid === selectedUid) : -1;
     if (idx < 0 && reveal) {
-      idx = rows.findIndex((r) => r.name === reveal.name && (r.namespace || undefined) === (reveal.namespace || undefined));
+      idx = rows.findIndex(
+        (r) => r.name === reveal.name && (r.namespace || undefined) === (reveal.namespace || undefined),
+      );
       if (idx >= 0) onSelect(rows[idx]);
     }
     if (idx < 0 || revealed.current === rows[idx].uid) return;
@@ -400,21 +444,21 @@ export function ResourceTable(props: Props) {
       {selectable && checkedRows.length > 0 && (
         <div className="bulkbar">
           <span>
-            <strong>{checkedRows.length}</strong> selected
+            <strong>{checkedRows.length}</strong> {S.table.selected}
           </span>
           {restartable && (
             <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => bulk(restartMany)}>
-              Restart
+              {S.actions.restart}
             </button>
           )}
           {deletable && (
             <button className="btn btn-sm btn-danger" disabled={busy} onClick={() => bulk(deleteMany)}>
-              Delete
+              {S.actions.delete}
             </button>
           )}
-          {busy && <span className="muted small">Working…</span>}
+          {busy && <span className="muted small">{S.table.working}</span>}
           <button className="btn btn-sm btn-ghost" onClick={() => setChecked(new Set())}>
-            Clear selection
+            {S.table.clearSelection}
           </button>
         </div>
       )}
@@ -435,8 +479,8 @@ export function ResourceTable(props: Props) {
                 checked={allVisibleChecked}
                 indeterminate={!allVisibleChecked && someVisibleChecked}
                 onChange={toggleAll}
-                title="Select all (matching the filter)"
-                aria-label="Select all"
+                title={S.table.selectAllHint}
+                aria-label={S.common.selectAll}
               />
             </span>
           )}
@@ -445,7 +489,7 @@ export function ResourceTable(props: Props) {
               key={c.key}
               className={`rtable-th ${c.kind === "name" ? "sticky-col" : ""} ${dragCol && dragCol !== c.label ? "droppable" : ""}`}
               style={c.kind === "name" ? { left: nameLeft } : undefined}
-              title={c.description ? `${c.description}\n(right-click to choose columns, drag to reorder)` : "Right-click to choose columns, drag to reorder"}
+              title={S.table.columnHint(c.description)}
               draggable
               onDragStart={() => setDragCol(c.label)}
               onDragEnd={() => setDragCol(null)}
@@ -473,12 +517,12 @@ export function ResourceTable(props: Props) {
         {status.error && (
           <div className="error-box inline">
             {status.error}
-            <span className="muted small"> — retrying…</span>
+            <span className="muted small">{S.table.retrying}</span>
           </div>
         )}
-        {status.loading && <div className="empty">Loading {resource.kind}…</div>}
+        {status.loading && <div className="empty">{S.table.loading(resource.kind)}</div>}
         {!status.loading && !status.error && visibleRows.rows.length === 0 && (
-          <div className="empty">{visibleRows.total ? "No items match the filter" : `No ${resource.plural} found`}</div>
+          <div className="empty">{visibleRows.total ? S.table.noMatches : S.table.none(resource.plural)}</div>
         )}
         <div style={{ height: visibleRows.rows.length * ROW_HEIGHT, position: "relative", minWidth: minTableWidth }}>
           {slice.map((row, i) => (
@@ -498,16 +542,28 @@ export function ResourceTable(props: Props) {
                 const at = { clientX: e.clientX, clientY: e.clientY, preventDefault() {} };
                 // Permissions are per namespace; checks are cached so this is instant after the first time.
                 loadPerms(context, resource, row.namespace ?? null).then((perms) =>
-                  openContextMenu(at, targetMenu(target(row), { replicas: replicasOf(row), rowText: row.cells.map(cellText).join(" "), perms })),
+                  openContextMenu(
+                    at,
+                    targetMenu(target(row), {
+                      replicas: replicasOf(row),
+                      rowText: row.cells.map(cellText).join(" "),
+                      perms,
+                    }),
+                  ),
                 );
               }}
             >
               {selectable && (
-                <span className="rtable-check sticky-col" style={{ left: 0 }} onClick={(e) => e.stopPropagation()} onDoubleClick={(e) => e.stopPropagation()}>
+                <span
+                  className="rtable-check sticky-col"
+                  style={{ left: 0 }}
+                  onClick={(e) => e.stopPropagation()}
+                  onDoubleClick={(e) => e.stopPropagation()}
+                >
                   <Checkbox
                     checked={checked.has(row.uid)}
                     onClick={(e) => toggleRow(start + i, e.shiftKey)}
-                    aria-label={`Select ${row.name}`}
+                    aria-label={S.table.selectRow(row.name)}
                   />
                 </span>
               )}
@@ -528,7 +584,7 @@ export function ResourceTable(props: Props) {
                     </span>
                   );
                 }
-                const text = c.index < 0 ? row.namespace ?? "" : cellText(row.cells[c.index]);
+                const text = c.index < 0 ? (row.namespace ?? "") : cellText(row.cells[c.index]);
                 const tone = c.kind === "status" ? statusTone(text) : undefined;
                 return (
                   <span

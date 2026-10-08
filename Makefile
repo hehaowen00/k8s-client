@@ -2,10 +2,12 @@
 #
 #   make install     rebuild, package and install for this OS
 #   make uninstall   remove what `make install` put in place
-#   make dev         run in development (hot reload)
+#   make run         run in development (hot reload); `make dev` is an alias
+#   make macos-install / linux-install / windows-install   install for that OS
 #   make build       release binary only (no packaging)
 #   make package     OS installers/bundles in src-tauri/target/release/bundle
-#   make test        type-check, Rust tests and lints
+#   make test        type-check, format check, Rust tests and lints
+#   make fmt         format the TypeScript and Rust sources
 #   make prune       trim build files older than KEEP_DAYS days (default 14)
 #   make clean       delete all build output
 #
@@ -53,9 +55,9 @@ DESKTOP_DIR := $(DATADIR)/applications
 ICON_DIR    := $(DATADIR)/icons/hicolor
 DESKTOP     := $(DESKTOP_DIR)/$(APP_ID).desktop
 
-.PHONY: help deps dev build package test roadmap install uninstall clean prune \
-        install-macos install-linux install-windows \
-        uninstall-macos uninstall-linux uninstall-windows
+.PHONY: help deps run dev fmt build package test roadmap install uninstall clean prune \
+        macos-install linux-install windows-install \
+        macos-uninstall linux-uninstall windows-uninstall
 
 help:
 	@sed -n '/^#/!q; s/^# \{0,1\}//p' Makefile
@@ -64,8 +66,10 @@ help:
 deps:
 	$(PNPM) install
 
-dev: deps
+run: deps
 	$(PNPM) tauri dev
+
+dev: run
 
 build: deps
 	$(PNPM) tauri build --no-bundle
@@ -81,20 +85,26 @@ ifeq ($(PLATFORM),macos)
 	done
 endif
 
+fmt: deps
+	$(PNPM) exec prettier --write .
+	cd $(TAURI) && cargo fmt
+
 test: deps
 	npx tsc --noEmit
+	$(PNPM) exec prettier --check .
+	cd $(TAURI) && cargo fmt --check
 	cd $(TAURI) && cargo test --lib && cargo clippy -- -D warnings
 
 roadmap:
 	$(PNPM) -s roadmap --todo
 
-install: install-$(PLATFORM)
+install: $(PLATFORM)-install
 
-uninstall: uninstall-$(PLATFORM)
+uninstall: $(PLATFORM)-uninstall
 
 # ---------------------------------------------------------------- macOS
 
-install-macos: deps
+macos-install: deps
 	$(PNPM) tauri build --bundles app
 	@test -d "$(BUNDLE)/macos/$(APP).app" || { echo "error: $(BUNDLE)/macos/$(APP).app was not built"; exit 1; }
 	codesign --verify --deep --strict "$(BUNDLE)/macos/$(APP).app"
@@ -103,13 +113,13 @@ install-macos: deps
 	cp -R "$(BUNDLE)/macos/$(APP).app" "$(APP_DIR)/"
 	@echo "Installed $(APP_DIR)/$(APP).app"
 
-uninstall-macos:
+macos-uninstall:
 	rm -rf "$(APP_DIR)/$(APP).app"
 	@echo "Removed $(APP_DIR)/$(APP).app (settings stay in ~/Library/Application Support/$(APP_ID))"
 
 # ---------------------------------------------------------------- Linux
 
-install-linux: build
+linux-install: build
 	install -Dm755 "$(RELEASE)/$(BIN)" "$(BINDIR)/$(BIN)"
 	install -Dm644 "$(TAURI)/icons/32x32.png"       "$(ICON_DIR)/32x32/apps/$(BIN).png"
 	install -Dm644 "$(TAURI)/icons/128x128.png"     "$(ICON_DIR)/128x128/apps/$(BIN).png"
@@ -134,7 +144,7 @@ install-linux: build
 	@echo "Installed $(BINDIR)/$(BIN) and $(DESKTOP)"
 	@case ":$$PATH:" in *":$(BINDIR):"*) ;; *) echo "note: $(BINDIR) is not on your PATH (the app menu entry still works)";; esac
 
-uninstall-linux:
+linux-uninstall:
 	rm -f "$(BINDIR)/$(BIN)" "$(DESKTOP)"
 	rm -f "$(ICON_DIR)/32x32/apps/$(BIN).png" "$(ICON_DIR)/128x128/apps/$(BIN).png" "$(ICON_DIR)/256x256/apps/$(BIN).png" "$(ICON_DIR)/512x512/apps/$(BIN).png"
 	-command -v update-desktop-database >/dev/null && update-desktop-database -q "$(DESKTOP_DIR)"
@@ -142,7 +152,7 @@ uninstall-linux:
 
 # ---------------------------------------------------------------- Windows (Git Bash / MSYS make)
 
-install-windows: deps
+windows-install: deps
 	$(PNPM) tauri build --bundles nsis
 	@installer=$$(ls -t "$(BUNDLE)"/nsis/*-setup.exe 2>/dev/null | head -n1); \
 	 test -n "$$installer" || { echo "error: no NSIS installer in $(BUNDLE)/nsis"; exit 1; }; \
@@ -150,7 +160,7 @@ install-windows: deps
 	 "$$installer" /S
 	@echo "Installed $(APP) (Start menu → $(APP))"
 
-uninstall-windows:
+windows-uninstall:
 	@uninstaller="$$LOCALAPPDATA/$(APP)/uninstall.exe"; \
 	 if [ -f "$$uninstaller" ]; then "$$uninstaller" /S && echo "Removed $(APP)"; \
 	 else echo "Not installed at $$uninstaller (use Add/Remove Programs)"; fi

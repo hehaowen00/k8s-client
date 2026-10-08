@@ -19,6 +19,7 @@ use tokio_util::sync::CancellationToken;
 use crate::kube_ops::urlencode;
 use crate::metrics::qty;
 use crate::state::{AppState, Result};
+use crate::strings;
 use crate::watch::{list_watch, Event};
 
 const IDLE_STOP: Duration = Duration::from_secs(90);
@@ -97,7 +98,11 @@ struct Kind<T> {
 
 impl<T> Default for Kind<T> {
     fn default() -> Self {
-        Kind { items: HashMap::new(), synced: false, error: None }
+        Kind {
+            items: HashMap::new(),
+            synced: false,
+            error: None,
+        }
     }
 }
 
@@ -145,22 +150,37 @@ fn node_summary(n: Node) -> NodeSummary {
     roles.sort();
     NodeSummary {
         name: n.metadata.name.unwrap_or_default(),
-        ready: status.conditions.iter().flatten().any(|c| c.type_ == "Ready" && c.status == "True"),
+        ready: status
+            .conditions
+            .iter()
+            .flatten()
+            .any(|c| c.type_ == "Ready" && c.status == "True"),
         unschedulable: n.spec.and_then(|s| s.unschedulable).unwrap_or(false),
         roles,
         cpu_allocatable: qty(&status.allocatable, "cpu"),
         memory_allocatable: qty(&status.allocatable, "memory"),
         pods_allocatable: qty(&status.allocatable, "pods"),
-        kubelet_version: status.node_info.map(|i| i.kubelet_version).unwrap_or_default(),
+        kubelet_version: status
+            .node_info
+            .map(|i| i.kubelet_version)
+            .unwrap_or_default(),
     }
 }
 
 fn pod_summary(p: Pod) -> PodSummary {
-    let phase = p.status.and_then(|s| s.phase).unwrap_or_else(|| "Unknown".into());
+    let phase = p
+        .status
+        .and_then(|s| s.phase)
+        .unwrap_or_else(|| "Unknown".into());
     let mut resources = [0.0; 4];
     // Requests/limits only count pods that hold resources.
     if phase == "Running" || phase == "Pending" {
-        for r in p.spec.iter().flat_map(|s| s.containers.iter()).filter_map(|c| c.resources.as_ref()) {
+        for r in p
+            .spec
+            .iter()
+            .flat_map(|s| s.containers.iter())
+            .filter_map(|c| c.resources.as_ref())
+        {
             resources[0] += qty(&r.requests, "cpu");
             resources[1] += qty(&r.requests, "memory");
             resources[2] += qty(&r.limits, "cpu");
@@ -186,12 +206,20 @@ fn deployment_health(d: Deployment) -> Health {
 fn statefulset_health(s: StatefulSet) -> Health {
     let want = s.spec.and_then(|s| s.replicas).unwrap_or(1);
     let ready = s.status.and_then(|s| s.ready_replicas).unwrap_or(0);
-    if ready >= want { Health::Healthy } else { Health::Progressing }
+    if ready >= want {
+        Health::Healthy
+    } else {
+        Health::Progressing
+    }
 }
 
 fn daemonset_health(d: DaemonSet) -> Health {
     let st = d.status.unwrap_or_default();
-    if st.number_ready >= st.desired_number_scheduled { Health::Healthy } else { Health::Progressing }
+    if st.number_ready >= st.desired_number_scheduled {
+        Health::Healthy
+    } else {
+        Health::Progressing
+    }
 }
 
 fn job_health(j: Job) -> Health {
@@ -276,17 +304,77 @@ fn start(client: &Client, namespace: Option<&str>) -> OverviewWatch {
         Some(ns) => format!("{prefix}/namespaces/{ns}/{plural}?"),
         None => format!("{prefix}/{plural}?"),
     };
-    spawn_kind(client, "/api/v1/nodes?".into(), &stores, &token, |s| &mut s.nodes, node_summary);
-    spawn_kind(client, scoped("/api/v1", "pods"), &stores, &token, |s| &mut s.pods, pod_summary);
-    spawn_kind(client, scoped("/apis/apps/v1", "deployments"), &stores, &token, |s| &mut s.deployments, deployment_health);
-    spawn_kind(client, scoped("/apis/apps/v1", "statefulsets"), &stores, &token, |s| &mut s.statefulsets, statefulset_health);
-    spawn_kind(client, scoped("/apis/apps/v1", "daemonsets"), &stores, &token, |s| &mut s.daemonsets, daemonset_health);
-    spawn_kind(client, scoped("/apis/batch/v1", "jobs"), &stores, &token, |s| &mut s.jobs, job_health);
-    let events = format!("{}fieldSelector={}&", scoped("/api/v1", "events"), urlencode("type=Warning"));
-    spawn_kind(client, events, &stores, &token, |s| &mut s.warnings, warning_event);
+    spawn_kind(
+        client,
+        "/api/v1/nodes?".into(),
+        &stores,
+        &token,
+        |s| &mut s.nodes,
+        node_summary,
+    );
+    spawn_kind(
+        client,
+        scoped("/api/v1", "pods"),
+        &stores,
+        &token,
+        |s| &mut s.pods,
+        pod_summary,
+    );
+    spawn_kind(
+        client,
+        scoped("/apis/apps/v1", "deployments"),
+        &stores,
+        &token,
+        |s| &mut s.deployments,
+        deployment_health,
+    );
+    spawn_kind(
+        client,
+        scoped("/apis/apps/v1", "statefulsets"),
+        &stores,
+        &token,
+        |s| &mut s.statefulsets,
+        statefulset_health,
+    );
+    spawn_kind(
+        client,
+        scoped("/apis/apps/v1", "daemonsets"),
+        &stores,
+        &token,
+        |s| &mut s.daemonsets,
+        daemonset_health,
+    );
+    spawn_kind(
+        client,
+        scoped("/apis/batch/v1", "jobs"),
+        &stores,
+        &token,
+        |s| &mut s.jobs,
+        job_health,
+    );
+    let events = format!(
+        "{}fieldSelector={}&",
+        scoped("/api/v1", "events"),
+        urlencode("type=Warning")
+    );
+    spawn_kind(
+        client,
+        events,
+        &stores,
+        &token,
+        |s| &mut s.warnings,
+        warning_event,
+    );
     if namespace.is_none() {
         let ns_url = "/api/v1/namespaces?".to_string();
-        spawn_kind(client, ns_url, &stores, &token, |s| &mut s.namespaces, |_: Value| ());
+        spawn_kind(
+            client,
+            ns_url,
+            &stores,
+            &token,
+            |s| &mut s.namespaces,
+            |_: Value| (),
+        );
     }
     {
         let (client, stores) = (client.clone(), stores.clone());
@@ -308,7 +396,11 @@ fn counts(kind: &str, k: &Kind<Health>) -> Option<WorkloadCount> {
     if !k.synced {
         return None;
     }
-    let mut w = WorkloadCount { kind: kind.into(), total: k.items.len(), ..Default::default() };
+    let mut w = WorkloadCount {
+        kind: kind.into(),
+        total: k.items.len(),
+        ..Default::default()
+    };
     for h in k.items.values() {
         match h {
             Health::Healthy => w.healthy += 1,
@@ -321,9 +413,16 @@ fn counts(kind: &str, k: &Kind<Health>) -> Option<WorkloadCount> {
 
 fn compute(s: &Stores, cluster_wide: bool) -> Result<Overview> {
     if !s.pods.synced {
-        return Err(s.pods.error.clone().unwrap_or_else(|| "pods are still loading".into()));
+        return Err(s
+            .pods
+            .error
+            .clone()
+            .unwrap_or_else(|| strings::PODS_STILL_LOADING.into()));
     }
-    let mut o = Overview { server_version: s.server_version.clone(), ..Default::default() };
+    let mut o = Overview {
+        server_version: s.server_version.clone(),
+        ..Default::default()
+    };
     // Nodes may be forbidden for namespace-scoped users; the rest still works.
     if s.nodes.synced {
         o.nodes = s.nodes.items.values().cloned().collect();
@@ -337,7 +436,11 @@ fn compute(s: &Stores, cluster_wide: bool) -> Result<Overview> {
         o.cpu_limits += p.resources[2];
         o.memory_limits += p.resources[3];
     }
-    let mut pods = WorkloadCount { kind: "Pod".into(), total: o.pods_total, ..Default::default() };
+    let mut pods = WorkloadCount {
+        kind: "Pod".into(),
+        total: o.pods_total,
+        ..Default::default()
+    };
     for (phase, n) in &o.pod_phases {
         match phase.as_str() {
             "Running" | "Succeeded" => pods.healthy += n,

@@ -7,6 +7,7 @@ import { useAsync } from "../hooks";
 import { useTabs, type Tab, contextLabel } from "../store";
 import { useResolvedTheme, useSettings } from "../settings";
 import { Select } from "../components/Select";
+import { S } from "../strings";
 
 type TermTab = Extract<Tab, { kind: "exec" | "terminal" }>;
 
@@ -60,7 +61,15 @@ const THEME_LIGHT = {
   brightWhite: "#8c959f",
 };
 
-export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: boolean; onUpdate?: (patch: Partial<TermTab>) => void }) {
+export function TerminalView({
+  tab,
+  active,
+  onUpdate,
+}: {
+  tab: TermTab;
+  active: boolean;
+  onUpdate?: (patch: Partial<TermTab>) => void;
+}) {
   const theme = useResolvedTheme();
   const fontSize = useSettings((s) => s.settings?.terminalFontSize ?? 13);
   const updateTab = useTabs((s) => s.update);
@@ -89,10 +98,10 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
     [pod.data],
   );
   const container = isExec
-    ? tab.container ??
+    ? (tab.container ??
       pod.data?.metadata?.annotations?.["kubectl.kubernetes.io/default-container"] ??
       containers[0] ??
-      null
+      null)
     : null;
   const ready = !isExec || !!nodeShell || !!container || !pod.loading;
 
@@ -132,7 +141,8 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
     // returning true here means "handled": the terminal skips the key.
     term.attachCustomKeyEventHandler((e) => {
       if (e.ctrlKey && e.key === "Tab") return true;
-      if (isMod(e) && (e.key === "Tab" || e.key === "PageUp" || e.key === "PageDown" || /^[1-9]$/.test(e.key))) return true;
+      if (isMod(e) && (e.key === "Tab" || e.key === "PageUp" || e.key === "PageDown" || /^[1-9]$/.test(e.key)))
+        return true;
       const clip = platform === "mac" ? e.metaKey && !e.shiftKey : e.ctrlKey && e.shiftKey;
       const key = e.key.toLowerCase();
       if (clip && (key === "c" || key === "v")) {
@@ -172,7 +182,7 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
       if (disposed) return;
       if (e.type === "data") term.write(e.data);
       else {
-        term.write(`\r\n\x1b[2m[session closed${e.message ? `: ${e.message}` : ""}]\x1b[0m\r\n`);
+        term.write(`\r\n\x1b[2m[${S.terminal.sessionClosed(e.message)}]\x1b[0m\r\n`);
         setSession({ state: "closed", message: e.message ?? undefined });
         deleteShellPod();
       }
@@ -189,7 +199,7 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
     const start = (async () => {
       if (tab.kind !== "exec") return api.ptyStart({ ...size, context: tab.context }, channel);
       if (nodeShell) {
-        term.write(`\x1b[2mStarting node shell pod on ${nodeShell}…\x1b[0m\r\n`);
+        term.write(`\x1b[2m${S.terminal.startingNodeShell(nodeShell)}\x1b[0m\r\n`);
         const created = await api.nodeShellCreate(tab.context, nodeShell);
         shellPod = created;
         if (disposed) {
@@ -202,7 +212,20 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
             namespace: created.namespace,
             pod: created.pod,
             // Enter the host's namespaces via PID 1.
-            command: ["nsenter", "-t", "1", "-m", "-u", "-i", "-n", "-p", "--", "sh", "-c", "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l"],
+            command: [
+              "nsenter",
+              "-t",
+              "1",
+              "-m",
+              "-u",
+              "-i",
+              "-n",
+              "-p",
+              "--",
+              "sh",
+              "-c",
+              "command -v bash >/dev/null 2>&1 && exec bash -l || exec sh -l",
+            ],
             ...size,
           },
           channel,
@@ -265,10 +288,14 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
     <div className="terminal-view">
       <div className="toolbar">
         <h2 className="toolbar-title">
-          {tab.kind === "exec" ? (tab.nodeShell ? `Node shell: ${tab.nodeShell}` : tab.pod) : "Terminal"}
-          {tab.kind === "exec" && tab.attach && <span className="badge">attached</span>}
+          {tab.kind === "exec"
+            ? tab.nodeShell
+              ? S.terminal.nodeShell(tab.nodeShell)
+              : tab.pod
+            : S.clusterView.terminal}
+          {tab.kind === "exec" && tab.attach && <span className="badge">{S.terminal.attached}</span>}
           {tab.kind === "terminal" && (
-            <span className="muted small">kubectl → {contextLabel(tab.context)}</span>
+            <span className="muted small">{S.terminal.kubectlTo(contextLabel(tab.context))}</span>
           )}
           {tab.kind === "exec" && (
             <span className="muted small">
@@ -289,12 +316,14 @@ export function TerminalView({ tab, active, onUpdate }: { tab: TermTab; active: 
             ))}
           </Select>
         )}
-        <span className={`dot tone-bg-${session.state === "open" ? "ok" : session.state === "closed" ? "bad" : "warn"}`} />
-        <span className="muted small">{session.state}</span>
+        <span
+          className={`dot tone-bg-${session.state === "open" ? "ok" : session.state === "closed" ? "bad" : "warn"}`}
+        />
+        <span className="muted small">{S.terminal.state[session.state]}</span>
         <div className="spacer" />
-        <span className="muted small">{terminalClipboardLabel} to copy / paste</span>
+        <span className="muted small">{S.terminal.clipboard(terminalClipboardLabel)}</span>
         <button className="btn btn-sm" onClick={() => setNonce((n) => n + 1)}>
-          {session.state === "closed" ? "Reconnect" : "Restart"}
+          {session.state === "closed" ? S.terminal.reconnect : S.actions.restart}
         </button>
       </div>
       {pod.error && <div className="error-box">{pod.error}</div>}

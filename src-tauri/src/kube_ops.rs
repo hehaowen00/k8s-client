@@ -1,9 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use kube::api::{
-    Api, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
-};
+use kube::api::{Api, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams};
 use kube::core::{ApiResource, GroupVersionKind};
 use kube::discovery::{Discovery, Scope};
 use kube::Client;
@@ -13,6 +11,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::state::{err, kerr, AppState, Result};
+use crate::strings;
 use crate::watch::{get_json, list_watch, Event as WatchEvent};
 
 const FIELD_MANAGER: &str = "kubetab";
@@ -66,9 +65,7 @@ impl ResourceInfo {
     pub(crate) fn api(&self, client: Client, namespace: Option<&str>) -> Api<DynamicObject> {
         let ar = self.api_resource();
         match namespace {
-            Some(ns) if self.namespaced && !ns.is_empty() => {
-                Api::namespaced_with(client, ns, &ar)
-            }
+            Some(ns) if self.namespaced && !ns.is_empty() => Api::namespaced_with(client, ns, &ar),
             _ => Api::all_with(client, &ar),
         }
     }
@@ -89,7 +86,11 @@ pub async fn discover(
     discover_resources(&state, &context, refresh.unwrap_or(false)).await
 }
 
-pub(crate) async fn discover_resources(state: &AppState, context: &str, refresh: bool) -> Result<Arc<Vec<ResourceInfo>>> {
+pub(crate) async fn discover_resources(
+    state: &AppState,
+    context: &str,
+    refresh: bool,
+) -> Result<Arc<Vec<ResourceInfo>>> {
     if !refresh {
         if let Some(d) = state.cached_discovery(context).await {
             return Ok(d);
@@ -132,7 +133,10 @@ pub async fn list_namespaces(state: State<'_, AppState>, context: String) -> Res
     }
     let client = state.client(&context).await?;
     let api: Api<k8s_openapi::api::core::v1::Namespace> = Api::all(client);
-    let list = api.list_metadata(&ListParams::default().match_any()).await.map_err(kerr)?;
+    let list = api
+        .list_metadata(&ListParams::default().match_any())
+        .await
+        .map_err(kerr)?;
     let mut names: Vec<String> = list
         .items
         .into_iter()
@@ -172,10 +176,19 @@ pub struct Row {
 #[derive(Serialize, Clone)]
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum TableEvent {
-    Reset { columns: Vec<Column>, rows: Vec<Row> },
-    Upsert { rows: Vec<Row> },
-    Delete { uids: Vec<String> },
-    Error { message: String },
+    Reset {
+        columns: Vec<Column>,
+        rows: Vec<Row>,
+    },
+    Upsert {
+        rows: Vec<Row>,
+    },
+    Delete {
+        uids: Vec<String>,
+    },
+    Error {
+        message: String,
+    },
 }
 
 fn parse_columns(table: &Value) -> Vec<Column> {
@@ -197,16 +210,13 @@ fn parse_columns(table: &Value) -> Vec<Column> {
 
 fn row_from_meta(meta: &Value, cells: Vec<Value>) -> Row {
     Row {
-        uid: meta["uid"]
-            .as_str()
-            .map(String::from)
-            .unwrap_or_else(|| {
-                format!(
-                    "{}/{}",
-                    meta["namespace"].as_str().unwrap_or_default(),
-                    meta["name"].as_str().unwrap_or_default()
-                )
-            }),
+        uid: meta["uid"].as_str().map(String::from).unwrap_or_else(|| {
+            format!(
+                "{}/{}",
+                meta["namespace"].as_str().unwrap_or_default(),
+                meta["name"].as_str().unwrap_or_default()
+            )
+        }),
         name: meta["name"].as_str().unwrap_or_default().to_string(),
         namespace: meta["namespace"].as_str().map(String::from),
         created: meta["creationTimestamp"].as_str().map(String::from),
@@ -238,11 +248,11 @@ fn fallback_columns(namespaced: bool) -> Vec<Column> {
         priority: 0,
         description: String::new(),
     };
-    let mut cols = vec![mk("Name", "string", "name")];
+    let mut cols = vec![mk(strings::COL_NAME, "string", "name")];
     if namespaced {
-        cols.push(mk("Namespace", "string", ""));
+        cols.push(mk(strings::COL_NAMESPACE, "string", ""));
     }
-    cols.push(mk("Age", "date", ""));
+    cols.push(mk(strings::COL_AGE, "date", ""));
     cols
 }
 
@@ -266,7 +276,12 @@ pub(crate) async fn list_table(
     res: &ResourceInfo,
 ) -> Result<(Vec<Column>, Vec<Row>)> {
     // `url` always ends in '?' or '&' (it may carry label/field selectors).
-    let v = get_json(client, &format!("{url}includeObject=Metadata&resourceVersion=0"), TABLE_ACCEPT).await?;
+    let v = get_json(
+        client,
+        &format!("{url}includeObject=Metadata&resourceVersion=0"),
+        TABLE_ACCEPT,
+    )
+    .await?;
     Ok(table_of(&v, res.namespaced))
 }
 
@@ -290,7 +305,12 @@ fn rows_of(obj: &Value, namespaced: bool) -> Vec<Row> {
     }
 }
 
-fn selector_url(resource: &ResourceInfo, namespace: Option<&str>, label_selector: Option<String>, field_selector: Option<String>) -> String {
+fn selector_url(
+    resource: &ResourceInfo,
+    namespace: Option<&str>,
+    label_selector: Option<String>,
+    field_selector: Option<String>,
+) -> String {
     let mut url = format!("{}?", resource.collection_url(namespace));
     if let Some(l) = label_selector.filter(|s| !s.is_empty()) {
         url.push_str(&format!("labelSelector={}&", urlencode(&l)));
@@ -313,7 +333,12 @@ pub async fn watch_resources(
 ) -> Result<String> {
     let client = state.client(&context).await?;
     let (id, token) = state.register_stream();
-    let url = selector_url(&resource, namespace.as_deref(), label_selector, field_selector) + "includeObject=Metadata&";
+    let url = selector_url(
+        &resource,
+        namespace.as_deref(),
+        label_selector,
+        field_selector,
+    ) + "includeObject=Metadata&";
     let (namespaced, can_watch) = (resource.namespaced, resource.can_watch());
     tokio::spawn(async move {
         list_watch(&client, &url, TABLE_ACCEPT, can_watch, &token, |ev| {
@@ -322,7 +347,9 @@ pub async fn watch_resources(
                     let (columns, rows) = table_of(&v, namespaced);
                     TableEvent::Reset { columns, rows }
                 }
-                WatchEvent::Upsert(o) => TableEvent::Upsert { rows: rows_of(&o, namespaced) },
+                WatchEvent::Upsert(o) => TableEvent::Upsert {
+                    rows: rows_of(&o, namespaced),
+                },
                 WatchEvent::Delete(o) => TableEvent::Delete {
                     uids: rows_of(&o, namespaced).into_iter().map(|r| r.uid).collect(),
                 },
@@ -357,7 +384,12 @@ pub async fn watch_objects(
 ) -> Result<String> {
     let client = state.client(&context).await?;
     let (id, token) = state.register_stream();
-    let url = selector_url(&resource, namespace.as_deref(), label_selector, field_selector);
+    let url = selector_url(
+        &resource,
+        namespace.as_deref(),
+        label_selector,
+        field_selector,
+    );
     let (ar, can_watch) = (resource.api_resource(), resource.can_watch());
     tokio::spawn(async move {
         list_watch(&client, &url, "application/json", can_watch, &token, |ev| {
@@ -395,7 +427,9 @@ pub async fn watch_objects(
 pub(crate) fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()
@@ -415,7 +449,11 @@ pub async fn list_objects(
     if let Some(l) = label_selector.as_deref().filter(|s| !s.is_empty()) {
         lp = lp.labels(l);
     }
-    let list = resource.api(client, namespace.as_deref()).list(&lp).await.map_err(kerr)?;
+    let list = resource
+        .api(client, namespace.as_deref())
+        .list(&lp)
+        .await
+        .map_err(kerr)?;
     let ar = resource.api_resource();
     list.items
         .into_iter()
@@ -494,7 +532,9 @@ pub async fn replace_yaml(
         // Conflict: the object changed since it was loaded. If only status / bookkeeping
         // changed (a controller updating status), rebase the edit onto the latest version.
         Err(kube::Error::Api(s)) if s.code == 409 => {
-            let original: Option<Value> = original_yaml.as_deref().and_then(|y| serde_yaml::from_str(y).ok());
+            let original: Option<Value> = original_yaml
+                .as_deref()
+                .and_then(|y| serde_yaml::from_str(y).ok());
             let latest = api.get(&name).await.map_err(kerr)?;
             let mut latest_v = serde_json::to_value(&latest).map_err(err)?;
             let rebase = match original {
@@ -502,13 +542,12 @@ pub async fn replace_yaml(
                 None => false,
             };
             if !rebase {
-                return Err(format!(
-                    "{} — it was changed on the server since you opened it. Reload to see the latest version.",
-                    s.message
-                ));
+                return Err(strings::edit_conflict(s.message));
             }
             obj.metadata.resource_version = latest.metadata.resource_version.clone();
-            api.replace(&name, &PostParams::default(), &obj).await.map_err(kerr)?
+            api.replace(&name, &PostParams::default(), &obj)
+                .await
+                .map_err(kerr)?
         }
         Err(e) => return Err(kerr(e)),
     };
@@ -637,12 +676,12 @@ pub async fn apply_manifest(
     let mut applied = Vec::new();
     for v in docs.into_iter().filter(|v| !v.is_null()) {
         let obj: DynamicObject = serde_json::from_value(v).map_err(err)?;
-        let types = obj.types.as_ref().ok_or("document missing apiVersion/kind")?;
+        let types = obj.types.as_ref().ok_or(strings::DOC_MISSING_TYPE)?;
         let gvk = GroupVersionKind::try_from(types).map_err(err)?;
         let res = by_gvk
             .get(&(gvk.group.clone(), gvk.version.clone(), gvk.kind.clone()))
-            .ok_or_else(|| format!("unknown resource type {}/{}", types.api_version, types.kind))?;
-        let name = obj.metadata.name.clone().ok_or("document missing metadata.name")?;
+            .ok_or_else(|| strings::unknown_resource_type(&types.api_version, &types.kind))?;
+        let name = obj.metadata.name.clone().ok_or(strings::DOC_MISSING_NAME)?;
         let ns = obj
             .metadata
             .namespace
@@ -720,8 +759,14 @@ pub struct AccessCheck {
 /// `kubectl auth can-i` for a batch of checks (SelfSubjectAccessReview).
 /// Checks that can't be evaluated come back `true` so the UI never hides actions by mistake.
 #[tauri::command]
-pub async fn can_i(state: State<'_, AppState>, context: String, checks: Vec<AccessCheck>) -> Result<Vec<bool>> {
-    use k8s_openapi::api::authorization::v1::{ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec};
+pub async fn can_i(
+    state: State<'_, AppState>,
+    context: String,
+    checks: Vec<AccessCheck>,
+) -> Result<Vec<bool>> {
+    use k8s_openapi::api::authorization::v1::{
+        ResourceAttributes, SelfSubjectAccessReview, SelfSubjectAccessReviewSpec,
+    };
     let client = state.client(&context).await?;
     let api: Api<SelfSubjectAccessReview> = Api::all(client);
     let tasks = checks.into_iter().map(|c| {

@@ -7,8 +7,22 @@ export interface Segment {
 }
 
 const BASE = [
-  "#1c1f26", "#ef6b73", "#8fd18b", "#e5c07b", "#7aa2ff", "#c678dd", "#56b6c2", "#d6dae3",
-  "#5c6370", "#ff8a91", "#a9e5a5", "#f0d399", "#9bbaff", "#d99cf0", "#7fd0db", "#ffffff",
+  "#1c1f26",
+  "#ef6b73",
+  "#8fd18b",
+  "#e5c07b",
+  "#7aa2ff",
+  "#c678dd",
+  "#56b6c2",
+  "#d6dae3",
+  "#5c6370",
+  "#ff8a91",
+  "#a9e5a5",
+  "#f0d399",
+  "#9bbaff",
+  "#d99cf0",
+  "#7fd0db",
+  "#ffffff",
 ];
 
 function color256(n: number): string {

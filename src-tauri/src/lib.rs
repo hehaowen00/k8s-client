@@ -1,8 +1,8 @@
 mod extensions;
 mod helm;
 mod kube_ops;
-mod kubectl;
 mod kubeconfigs;
+mod kubectl;
 mod mcp;
 mod metrics;
 mod multi_logs;
@@ -12,24 +12,48 @@ mod portforward;
 mod settings;
 mod state;
 mod streams;
+mod strings;
 mod updates;
 mod watch;
 
-/// The default macOS menu with a Settings item (Cmd+,) under the app menu.
+/// The default macOS menu, with a Settings item (Cmd+,) and short About / Hide / Quit labels.
 #[cfg(target_os = "macos")]
 fn app_menu(app: &tauri::AppHandle) -> tauri::Result<tauri::menu::Menu<tauri::Wry>> {
-    use tauri::menu::{Menu, MenuItem, MenuItemKind, PredefinedMenuItem};
+    use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+    let pkg = app.package_info();
+    let about = AboutMetadata {
+        name: Some(pkg.name.clone()),
+        version: Some(pkg.version.to_string()),
+        copyright: app.config().bundle.copyright.clone(),
+        authors: app.config().bundle.publisher.clone().map(|p| vec![p]),
+        ..Default::default()
+    };
+    let app_submenu = Submenu::with_items(
+        app,
+        pkg.name.clone(),
+        true,
+        &[
+            &PredefinedMenuItem::about(app, Some(strings::MENU_ABOUT), Some(about))?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                "settings",
+                strings::MENU_SETTINGS,
+                true,
+                Some("CmdOrCtrl+,"),
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::services(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::hide(app, Some(strings::MENU_HIDE))?,
+            &PredefinedMenuItem::hide_others(app, None)?,
+            &PredefinedMenuItem::separator(app)?,
+            &PredefinedMenuItem::quit(app, Some(strings::MENU_QUIT))?,
+        ],
+    )?;
     let menu = Menu::default(app)?;
-    if let Some(MenuItemKind::Submenu(app_submenu)) = menu.items()?.into_iter().next() {
-        // After "About" and its separator.
-        app_submenu.insert_items(
-            &[
-                &MenuItem::with_id(app, "settings", "Settings", true, Some("CmdOrCtrl+,"))?,
-                &PredefinedMenuItem::separator(app)?,
-            ],
-            2,
-        )?;
-    }
+    menu.remove_at(0)?;
+    menu.insert(&app_submenu, 0)?;
     Ok(menu)
 }
 
@@ -150,7 +174,11 @@ pub fn run() {
                 use tauri::Manager;
                 let st = app.state::<state::AppState>();
                 tauri::async_runtime::block_on(async {
-                    let _ = tokio::time::timeout(std::time::Duration::from_secs(3), st.delete_node_shells()).await;
+                    let _ = tokio::time::timeout(
+                        std::time::Duration::from_secs(3),
+                        st.delete_node_shells(),
+                    )
+                    .await;
                 });
             }
         });

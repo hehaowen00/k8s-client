@@ -10,7 +10,18 @@ import { openContextMenu } from "../components/ContextMenu";
 import { addClusterDialog } from "../components/AddClusterDialog";
 import { pickClusterIcon } from "../clusterIcon";
 import { bumpContexts, useContexts, useSettings, NO_CLUSTERS } from "../settings";
-import { contextColor, contextIcon, contextDetail, contextLabel, openCluster, openClusterSettings, openSingleton, useTabs, type Tab } from "../store";
+import {
+  contextColor,
+  contextIcon,
+  contextDetail,
+  contextLabel,
+  openCluster,
+  openClusterSettings,
+  openSingleton,
+  useTabs,
+  type Tab,
+} from "../store";
+import { S } from "../strings";
 
 export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
   const { data, error, loading, reload } = useContexts();
@@ -26,12 +37,12 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
     return next;
   };
   const addFolder = async () => {
-    const path = await openDialog({ directory: true, title: "Choose a folder of kubeconfig files" });
+    const path = await openDialog({ directory: true, title: S.home.chooseFolder });
     if (typeof path !== "string") return;
     try {
       const next = afterFolderChange(await api.addKubeconfigFolder(path));
       const info = next.find((f) => f.path === path);
-      toast(info ? `Loaded ${info.contexts} context${info.contexts === 1 ? "" : "s"} from ${info.files} file${info.files === 1 ? "" : "s"}` : "Folder added");
+      toast(info ? S.home.folderLoaded(info.contexts, info.files) : S.home.folderAdded);
     } catch (e) {
       toast(String(e), "bad");
     }
@@ -46,7 +57,12 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
 
   const q = query.toLowerCase();
   const contexts = (data ?? []).filter(
-    (c) => !q || c.name.toLowerCase().includes(q) || contextLabel(c.name).toLowerCase().includes(q) || c.cluster.toLowerCase().includes(q) || c.source?.toLowerCase().includes(q),
+    (c) =>
+      !q ||
+      c.name.toLowerCase().includes(q) ||
+      contextLabel(c.name).toLowerCase().includes(q) ||
+      c.cluster.toLowerCase().includes(q) ||
+      c.source?.toLowerCase().includes(q),
   );
   const fileName = (p: string) => p.split(/[\\/]/).pop();
 
@@ -57,17 +73,17 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
     <div className="home">
       <div className="home-inner">
         <h1>
-          <img className="logo" src={logo} alt="" width={34} height={34} /> Kube Portal
+          <img className="logo" src={logo} alt="" width={34} height={34} /> {S.app.name}
         </h1>
-        <p className="muted">Pick a cluster. {backgroundClickLabel} or middle-click opens it in a background tab.</p>
+        <p className="muted">{S.home.intro(backgroundClickLabel)}</p>
 
         <div className="home-section-title">
-          <span>Clusters{data ? ` (${data.length})` : ""}</span>
+          <span>{S.home.clusters(data?.length)}</span>
           <span className="home-actions">
             {(data?.length ?? 0) > 8 && (
               <input
                 className="input"
-                placeholder="Filter clusters"
+                placeholder={S.home.filterClusters}
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
               />
@@ -79,44 +95,46 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
                 folders.reload();
               }}
             >
-              Reload
+              {S.common.reload}
             </button>
             <button className="btn btn-sm" onClick={() => addClusterDialog()}>
-              + Add cluster
+              {S.home.addCluster}
             </button>
           </span>
         </div>
-        {loading && <div className="muted">Loading kubeconfig…</div>}
+        {loading && <div className="muted">{S.home.loading}</div>}
         {error && <div className="error-box">{error}</div>}
         <div className="context-grid">
           {contexts.map((c) => (
             <button
               key={c.name}
               className="context-card"
-              title={`${c.name}\n${c.source ?? "Default kubeconfig"}`}
+              title={`${c.name}\n${c.source ?? S.home.defaultKubeconfig}`}
               onClick={(e) => openContext(c.name, isBackgroundClick(e))}
               onAuxClick={(e) => e.button === 1 && openContext(c.name, true)}
               onContextMenu={(e) =>
                 openContextMenu(e, [
-                  { label: "Open in New Tab", onClick: () => openContext(c.name, true) },
+                  { label: S.common.openInNewTab, onClick: () => openContext(c.name, true) },
                   clusters[c.name]?.pinned
-                    ? { label: "Unpin from Hotbar", onClick: () => updateCluster(c.name, { pinned: false }) }
-                    : { label: "Pin to Hotbar", onClick: () => updateCluster(c.name, { pinned: true }) },
-                  { label: "Change Icon", onClick: () => pickClusterIcon(c.name) },
-                  ...(clusters[c.name]?.icon ? [{ label: "Remove Icon", onClick: () => updateCluster(c.name, { icon: null }) }] : []),
-                  { label: "Cluster Settings", onClick: () => openClusterSettings(c.name, { replace: tab.id }) },
+                    ? { label: S.home.unpin, onClick: () => updateCluster(c.name, { pinned: false }) }
+                    : { label: S.home.pin, onClick: () => updateCluster(c.name, { pinned: true }) },
+                  { label: S.home.changeIcon, onClick: () => pickClusterIcon(c.name) },
+                  ...(clusters[c.name]?.icon
+                    ? [{ label: S.home.removeIcon, onClick: () => updateCluster(c.name, { icon: null }) }]
+                    : []),
+                  { label: S.cluster.settings, onClick: () => openClusterSettings(c.name, { replace: tab.id }) },
                   ...(c.source && folders.data?.some((f) => f.managed && c.source!.startsWith(f.path))
                     ? [
                         { separator: true, label: "" },
                         {
-                          label: "Remove from Kube Portal",
+                          label: S.home.removeCluster,
                           danger: true,
                           onClick: async () => {
                             const ok = await confirmDialog({
-                              title: "Remove cluster",
-                              message: `Delete the kubeconfig you added for ${contextLabel(c.name)}? (Other contexts in the same file are removed too.)`,
+                              title: S.home.removeClusterTitle,
+                              message: S.home.removeClusterMessage(contextLabel(c.name)),
                               danger: true,
-                              confirmLabel: "Remove",
+                              confirmLabel: S.common.remove,
                             });
                             if (!ok) return;
                             try {
@@ -138,45 +156,45 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
               <span className="context-meta">
                 <span className="context-name">
                   {contextLabel(c.name)}
-                  {c.current && <span className="badge">current</span>}
-                  {clusters[c.name]?.pinned && <span className="badge">pinned</span>}
+                  {c.current && <span className="badge">{S.home.current}</span>}
+                  {clusters[c.name]?.pinned && <span className="badge">{S.home.pinned}</span>}
                 </span>
                 <span className="muted small">
-                  {contextDetail(c.name) ?? `cluster ${c.cluster}${c.user ? ` · user ${c.user}` : ""}`}
-                  {c.namespace ? ` · ns ${c.namespace}` : ""}
+                  {contextDetail(c.name) ?? S.home.contextDetail(c.cluster, c.user)}
+                  {c.namespace ? S.home.contextNamespace(c.namespace) : ""}
                   {c.source ? ` · ${fileName(c.source)}` : ""}
                 </span>
               </span>
             </button>
           ))}
-          {data && data.length === 0 && (
-            <div className="muted">No contexts found. Add a folder of kubeconfig files below.</div>
-          )}
-          {data && data.length > 0 && contexts.length === 0 && <div className="muted">No clusters match.</div>}
+          {data && data.length === 0 && <div className="muted">{S.home.noContexts}</div>}
+          {data && data.length > 0 && contexts.length === 0 && <div className="muted">{S.home.noMatches}</div>}
         </div>
 
         <div className="home-section-title">
-          <span>Kubeconfig folders</span>
+          <span>{S.home.folders}</span>
           <button className="btn btn-sm" onClick={addFolder}>
-            + Add folder
+            {S.home.addFolder}
           </button>
         </div>
         <div className="folders">
           <div className="folder-row">
             <span className="mono small">$KUBECONFIG / ~/.kube/config</span>
-            <span className="muted small">always loaded</span>
+            <span className="muted small">{S.home.alwaysLoaded}</span>
           </div>
           {folders.data?.map((f) => (
             <div key={f.path} className="folder-row">
               <span className="mono small" title={f.path}>
-                {f.managed ? "Added in Kube Portal" : f.path}
+                {f.managed ? S.home.addedInApp : f.path}
               </span>
-              <span className="muted small">
-                {f.contexts} context{f.contexts === 1 ? "" : "s"} · {f.files} file{f.files === 1 ? "" : "s"}
-              </span>
+              <span className="muted small">{S.home.folderCounts(f.contexts, f.files)}</span>
               {!f.managed && (
-                <button className="btn btn-xs btn-ghost" title="Remove folder" onClick={() => removeFolder(f.path)}>
-                  Remove
+                <button
+                  className="btn btn-xs btn-ghost"
+                  title={S.home.removeFolder}
+                  onClick={() => removeFolder(f.path)}
+                >
+                  {S.common.remove}
                 </button>
               )}
               {f.errors.length > 0 && (
@@ -191,21 +209,21 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
         </div>
 
         <div className="home-section-title">
-          <span>Tools</span>
+          <span>{S.home.tools}</span>
         </div>
         <div className="context-grid">
           <button className="context-card" onClick={() => openSingleton("settings")}>
             <span className="context-avatar tool">⚙</span>
             <span className="context-meta">
-              <span className="context-name">Settings</span>
-              <span className="muted small">Theme, kubeconfig, tools ({shortcut(",")})</span>
+              <span className="context-name">{S.settings.title}</span>
+              <span className="muted small">{S.home.settingsHint(shortcut(","))}</span>
             </span>
           </button>
           <button className="context-card" onClick={() => openSingleton("portforwards")}>
             <span className="context-avatar tool">⇄</span>
             <span className="context-meta">
-              <span className="context-name">Port Forwards</span>
-              <span className="muted small">Active forwards across all clusters</span>
+              <span className="context-name">{S.portForward.listTitle}</span>
+              <span className="muted small">{S.home.portForwardsHint}</span>
             </span>
           </button>
           <button
@@ -214,18 +232,19 @@ export function HomeView({ tab }: { tab: Extract<Tab, { kind: "home" }> }) {
           >
             <span className="context-avatar tool">⇪</span>
             <span className="context-meta">
-              <span className="context-name">Apply Manifest</span>
-              <span className="muted small">Server-side apply YAML to a cluster</span>
+              <span className="context-name">{S.apply.title}</span>
+              <span className="muted small">{S.home.applyHint}</span>
             </span>
           </button>
         </div>
 
         <div className="home-section-title">
-          <span>Shortcuts</span>
+          <span>{S.home.shortcuts}</span>
         </div>
         <div className="shortcuts">
-          <kbd>{shortcut("T")}</kbd> new tab <kbd>{shortcut("W")}</kbd> close tab <kbd>{nextTabLabel}</kbd> next tab <kbd>{shortcut("1…9")}</kbd> jump
-          to tab <kbd>Middle-click</kbd> open in / close tab
+          <kbd>{shortcut("T")}</kbd> {S.home.keyNewTab} <kbd>{shortcut("W")}</kbd> {S.home.keyCloseTab}{" "}
+          <kbd>{nextTabLabel}</kbd> {S.home.keyNextTab} <kbd>{shortcut("1…9")}</kbd> {S.home.keyJump}{" "}
+          <kbd>{S.home.middleClick}</kbd> {S.home.keyMiddleClick}
         </div>
       </div>
     </div>

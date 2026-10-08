@@ -2,6 +2,7 @@ import { useState } from "react";
 import { DEFAULT_SPAN, SPANS, useMetricSeries, type MetricSpec } from "../metrics";
 import { formatBytes, formatCpu } from "../util";
 import { BarChart, type RefLine } from "./Chart";
+import { S } from "../strings";
 
 let lastSpan = DEFAULT_SPAN;
 
@@ -22,14 +23,10 @@ export function MetricsPanel({
   const series = useMetricSeries(context, spec, active, span);
   if (!spec) return null;
   if (series.source === null && !series.cpu.length) {
-    return (
-      <div className="muted small metrics-note">
-        Metrics unavailable — install metrics-server (live usage) or Prometheus (history) to see charts.
-      </div>
-    );
+    return <div className="muted small metrics-note">{S.metrics.unavailable}</div>;
   }
   const collecting = series.source === "metrics-server" && series.cpu.length < 2;
-  const empty = collecting ? "Collecting samples (every 10s)…" : "No data";
+  const empty = collecting ? S.metrics.collecting : S.common.noData;
   return (
     <>
       <div className="segmented chart-spans">
@@ -48,7 +45,7 @@ export function MetricsPanel({
       </div>
       <div className="chart-row">
         <BarChart
-          title="CPU"
+          title={S.metrics.cpu}
           points={series.cpu}
           format={formatCpu}
           refs={cpuRefs}
@@ -59,7 +56,7 @@ export function MetricsPanel({
           end={series.end}
         />
         <BarChart
-          title="Memory"
+          title={S.metrics.memory}
           points={series.memory}
           format={formatBytes}
           refs={memoryRefs}
@@ -72,9 +69,7 @@ export function MetricsPanel({
         />
       </div>
       <div className="muted small metrics-note">
-        {series.source === "prometheus"
-          ? "From Prometheus"
-          : "Sampled from metrics-server while Kube Portal is open (install Prometheus for history)"}
+        {series.source === "prometheus" ? S.metrics.fromPrometheus : S.metrics.fromMetricsServer}
         {series.error && <span className="tone-warn"> · {series.error}</span>}
       </div>
     </>

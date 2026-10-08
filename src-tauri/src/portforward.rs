@@ -15,6 +15,7 @@ use tokio::net::TcpListener;
 use tokio_util::sync::CancellationToken;
 
 use crate::state::{err, kerr, AppState, Result};
+use crate::strings;
 
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -44,8 +45,21 @@ pub struct Forwards(Mutex<HashMap<String, Forward>>);
 
 impl Forwards {
     fn list(&self) -> Vec<ForwardInfo> {
-        let mut v: Vec<ForwardInfo> = self.0.lock().unwrap().values().map(|f| f.info.lock().unwrap().clone()).collect();
-        v.sort_by(|a, b| (&a.context, &a.namespace, &a.name, a.remote_port).cmp(&(&b.context, &b.namespace, &b.name, b.remote_port)));
+        let mut v: Vec<ForwardInfo> = self
+            .0
+            .lock()
+            .unwrap()
+            .values()
+            .map(|f| f.info.lock().unwrap().clone())
+            .collect();
+        v.sort_by(|a, b| {
+            (&a.context, &a.namespace, &a.name, a.remote_port).cmp(&(
+                &b.context,
+                &b.namespace,
+                &b.name,
+                b.remote_port,
+            ))
+        });
         v
     }
 }
@@ -61,19 +75,26 @@ fn pod_ready(p: &Pod) -> bool {
 
 /// Resolve a service port to (pod, container port).
 async fn resolve_service(client: &Client, ns: &str, svc: &str, port: u16) -> Result<(String, u16)> {
-    let svc_obj = Api::<Service>::namespaced(client.clone(), ns).get(svc).await.map_err(kerr)?;
-    let spec = svc_obj.spec.ok_or("service has no spec")?;
+    let svc_obj = Api::<Service>::namespaced(client.clone(), ns)
+        .get(svc)
+        .await
+        .map_err(kerr)?;
+    let spec = svc_obj.spec.ok_or(strings::SERVICE_NO_SPEC)?;
     let selector = spec.selector.unwrap_or_default();
     if selector.is_empty() {
-        return Err(format!("service {svc} has no selector; cannot pick a pod"));
+        return Err(strings::service_no_selector(svc));
     }
     let sp = spec
         .ports
         .unwrap_or_default()
         .into_iter()
         .find(|p| p.port as u16 == port)
-        .ok_or_else(|| format!("service {svc} has no port {port}"))?;
-    let labels = selector.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",");
+        .ok_or_else(|| strings::service_no_port(svc, port))?;
+    let labels = selector
+        .iter()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect::<Vec<_>>()
+        .join(",");
     let pods = Api::<Pod>::namespaced(client.clone(), ns)
         .list(&ListParams::default().match_any().labels(&labels))
         .await
@@ -82,7 +103,7 @@ async fn resolve_service(client: &Client, ns: &str, svc: &str, port: u16) -> Res
         .items
         .into_iter()
         .find(pod_ready)
-        .ok_or_else(|| format!("no ready pods behind service {svc}"))?;
+        .ok_or_else(|| strings::no_ready_pods(svc))?;
     let target = match sp.target_port {
         Some(IntOrString::Int(n)) => n as u16,
         Some(IntOrString::String(name)) => pod
@@ -93,7 +114,7 @@ async fn resolve_service(client: &Client, ns: &str, svc: &str, port: u16) -> Res
             .flat_map(|c| c.ports.iter().flatten())
             .find(|p| p.name.as_deref() == Some(name.as_str()))
             .map(|p| p.container_port as u16)
-            .ok_or_else(|| format!("no container port named {name}"))?,
+            .ok_or_else(|| strings::no_container_port(&name))?,
         None => port,
     };
     Ok((pod.metadata.name.unwrap_or_default(), target))
@@ -103,7 +124,7 @@ async fn bind(preferred: Option<u16>, remote: u16) -> Result<TcpListener> {
     if let Some(p) = preferred.filter(|p| *p != 0) {
         return TcpListener::bind(("127.0.0.1", p))
             .await
-            .map_err(|e| format!("cannot listen on 127.0.0.1:{p}: {e}"));
+            .map_err(|e| strings::cannot_listen(p, e));
     }
     // Like Lens: reuse the remote port number locally when it's free and unprivileged.
     if remote >= 1024 {
@@ -131,7 +152,10 @@ pub async fn start_port_forward(
     if kind == "service" {
         resolve_service(&client, &namespace, &name, remote_port).await?;
     } else {
-        Api::<Pod>::namespaced(client.clone(), &namespace).get(&name).await.map_err(kerr)?;
+        Api::<Pod>::namespaced(client.clone(), &namespace)
+            .get(&name)
+            .await
+            .map_err(kerr)?;
     }
     let listener = bind(local_port, remote_port).await?;
     let local = listener.local_addr().map_err(err)?.port();
@@ -151,7 +175,13 @@ pub async fn start_port_forward(
     }));
     let token = CancellationToken::new();
     let result = info.lock().unwrap().clone();
-    forwards.0.lock().unwrap().insert(id, Forward { info: info.clone(), token: token.clone() });
+    forwards.0.lock().unwrap().insert(
+        id,
+        Forward {
+            info: info.clone(),
+            token: token.clone(),
+        },
+    );
 
     tokio::spawn(async move {
         loop {
@@ -180,7 +210,7 @@ pub async fn start_port_forward(
                     };
                     info.lock().unwrap().last_pod = Some(pod.clone());
                     let mut pf = Api::<Pod>::namespaced(client, &ns).portforward(&pod, &[port]).await.map_err(kerr)?;
-                    let mut upstream = pf.take_stream(port).ok_or("port-forward stream unavailable")?;
+                    let mut upstream = pf.take_stream(port).ok_or(strings::PORT_FORWARD_STREAM_UNAVAILABLE)?;
                     let error = pf.take_error(port);
                     let copied = tokio::select! {
                         _ = token.cancelled() => Ok(()),

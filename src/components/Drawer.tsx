@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { usePref } from "../hooks";
+import { S } from "../strings";
 
 const MIN = 320;
 
@@ -42,7 +43,7 @@ export function Drawer({ children }: { children: React.ReactNode }) {
           setWidth(null);
           setSaved(null);
         }}
-        title="Drag to resize · double-click to reset"
+        title={S.common.dragToResizeOrReset}
       />
       {children}
     </div>

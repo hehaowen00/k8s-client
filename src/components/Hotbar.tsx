@@ -2,8 +2,17 @@ import { isBackgroundClick } from "../keys";
 import { useState } from "react";
 import { useSettings, NO_CLUSTERS } from "../settings";
 import { usePref } from "../hooks";
-import { contextColor, contextIcon, contextLabel, openCluster, openClusterSettings, tabContext, useTabs } from "../store";
+import {
+  contextColor,
+  contextIcon,
+  contextLabel,
+  openCluster,
+  openClusterSettings,
+  tabContext,
+  useTabs,
+} from "../store";
 import { openContextMenu } from "./ContextMenu";
+import { S } from "../strings";
 
 /** Pinned clusters rail (Lens "hotbar"). Hidden until something is pinned. */
 export function Hotbar() {
@@ -33,7 +42,7 @@ export function Hotbar() {
     setOverCtx(null);
   };
   return (
-    <nav className="hotbar" aria-label="Pinned clusters">
+    <nav className="hotbar" aria-label={S.hotbar.label}>
       {pinned.map((ctx) => {
         const label = contextLabel(ctx);
         return (
@@ -60,18 +69,25 @@ export function Hotbar() {
               setDragCtx(null);
               setOverCtx(null);
             }}
-            onClick={(e) => openCluster(ctx, { focusExisting: !isBackgroundClick(e), background: isBackgroundClick(e) })}
+            onClick={(e) =>
+              openCluster(ctx, { focusExisting: !isBackgroundClick(e), background: isBackgroundClick(e) })
+            }
             onAuxClick={(e) => e.button === 1 && openCluster(ctx, { background: true })}
             onContextMenu={(e) =>
               openContextMenu(e, [
-                { label: "Open in New Tab", onClick: () => openCluster(ctx) },
-                { label: "Cluster Settings", onClick: () => openClusterSettings(ctx) },
+                { label: S.common.openInNewTab, onClick: () => openCluster(ctx) },
+                { label: S.cluster.settings, onClick: () => openClusterSettings(ctx) },
                 { separator: true, label: "" },
-                { label: "Unpin", onClick: () => updateCluster(ctx, { pinned: false }) },
+                { label: S.hotbar.unpin, onClick: () => updateCluster(ctx, { pinned: false }) },
               ])
             }
           >
-            {!contextIcon(ctx) && (label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toUpperCase() || "?")}
+            {!contextIcon(ctx) &&
+              (label
+                .replace(/[^a-z0-9]/gi, "")
+                .slice(0, 2)
+                .toUpperCase() ||
+                "?")}
           </button>
         );
       })}

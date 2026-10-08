@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist, type StateStorage } from "zustand/middleware";
 import type { ResourceInfo } from "./api";
 import { useSettings } from "./settings";
+import { S } from "./strings";
 
 interface TabBase {
   id: string;
@@ -189,14 +190,14 @@ export const useTabs = create<TabsState>()(
         set((s) => {
           const tabs = [...s.tabs];
           // Blank tabs go at the end (like a browser's new tab); others open next to their source.
-          const anchor = tab.kind === "home" ? null : opts?.after ?? s.activeId;
+          const anchor = tab.kind === "home" ? null : (opts?.after ?? s.activeId);
           const idx = anchor ? tabs.findIndex((t) => t.id === anchor) : -1;
           const newTab = { ...tab, id } as Tab;
           // Opening something in the foreground takes over a blank "New Tab" instead of leaving it behind.
           if (tab.kind !== "home" && !opts?.background && tabs[idx]?.kind === "home") tabs[idx] = newTab;
           else if (idx >= 0) tabs.splice(idx + 1, 0, newTab);
           else tabs.push(newTab);
-          return { tabs, activeId: opts?.background ? s.activeId ?? id : id };
+          return { tabs, activeId: opts?.background ? (s.activeId ?? id) : id };
         });
         return id;
       },
@@ -266,7 +267,7 @@ syncNamespaces(useTabs.getState().tabs);
   const has = (id: string | null) => restored.some((t) => t.id === id);
   useTabs.setState({
     tabs: restored,
-    activeId: has(activeId) ? activeId : restored[0]?.id ?? null,
+    activeId: has(activeId) ? activeId : (restored[0]?.id ?? null),
     splitId: has(splitId) && splitId !== activeId ? splitId : null,
   });
 }
@@ -275,30 +276,33 @@ useTabs.subscribe((s, prev) => s.tabs !== prev.tabs && syncNamespaces(s.tabs, pr
 export function tabTitle(tab: Tab): string {
   switch (tab.kind) {
     case "home":
-      return "New Tab";
+      return S.tabs.newTab;
     case "cluster":
       return contextLabel(tab.context);
     case "detail":
-      return `${tab.resource.kind}: ${tab.name}`;
+      return S.tabs.detail(tab.resource.kind, tab.name);
     case "logs":
-      return tab.workload ? `Logs: ${tab.workload.kind.toLowerCase()}/${tab.workload.name}` : `Logs: ${tab.pod}`;
+      return S.tabs.logs(tab.workload ? `${tab.workload.kind.toLowerCase()}/${tab.workload.name}` : tab.pod);
     case "exec":
-      return tab.nodeShell ? `Node: ${tab.nodeShell}` : `${tab.attach ? "Attach" : "Shell"}: ${tab.pod}`;
+      return tab.nodeShell ? S.tabs.node(tab.nodeShell) : tab.attach ? S.tabs.attach(tab.pod) : S.tabs.shell(tab.pod);
     case "terminal":
-      return `Terminal: ${contextLabel(tab.context)}`;
+      return S.tabs.terminal(contextLabel(tab.context));
     case "apply":
-      return "Apply Manifest";
+      return S.apply.title;
     case "portforwards":
-      return "Port Forwards";
+      return S.portForward.listTitle;
     case "settings":
-      return "Settings";
+      return S.settings.title;
     case "cluster-settings":
-      return `Settings: ${contextLabel(tab.context)}`;
+      return S.tabs.clusterSettings(contextLabel(tab.context));
   }
 }
 
 /** Open (or focus) a cluster tab for `context`, honouring its default namespace. */
-export function openCluster(context: string, opts?: { background?: boolean; replace?: string; focusExisting?: boolean }) {
+export function openCluster(
+  context: string,
+  opts?: { background?: boolean; replace?: string; focusExisting?: boolean },
+) {
   const { tabs, activate, open, update } = useTabs.getState();
   if (opts?.focusExisting) {
     const existing = tabs.find((t) => t.kind === "cluster" && t.context === context);
@@ -332,7 +336,7 @@ export function backToHome(id: string) {
 }
 
 export function tabContext(tab: Tab): string | null {
-  return "context" in tab ? tab.context ?? null : null;
+  return "context" in tab ? (tab.context ?? null) : null;
 }
 
 export function pluralLabel(r: ResourceInfo): string {
@@ -358,7 +362,7 @@ export function contextLabel(ctx: string): string {
 /** Extra detail for contexts whose label hides information (e.g. EKS region/account). */
 export function contextDetail(ctx: string): string | null {
   const m = EKS_ARN.exec(ctx);
-  return m ? `EKS · ${m[1]} · ${m[2]}` : null;
+  return m ? S.cluster.eksDetail(m[1], m[2]) : null;
 }
 
 export const contextIcon = (ctx: string) => useSettings.getState().settings?.clusters[ctx]?.icon || null;
@@ -397,15 +401,19 @@ export const dock = {
     setDock(tabId, (d) => {
       const idx = d.items.findIndex((i) => i.id === itemId);
       const items = d.items.filter((i) => i.id !== itemId);
-      const activeId = d.activeId === itemId ? items[Math.min(idx, items.length - 1)]?.id ?? null : d.activeId;
+      const activeId = d.activeId === itemId ? (items[Math.min(idx, items.length - 1)]?.id ?? null) : d.activeId;
       return { ...d, items, activeId };
     });
   },
-  closeOthers: (tabId: string, itemId: string) => setDock(tabId, (d) => ({ ...d, items: d.items.filter((i) => i.id === itemId), activeId: itemId })),
+  closeOthers: (tabId: string, itemId: string) =>
+    setDock(tabId, (d) => ({ ...d, items: d.items.filter((i) => i.id === itemId), activeId: itemId })),
   closeAll: (tabId: string) => setDock(tabId, (d) => ({ ...d, items: [], activeId: null })),
   activate: (tabId: string, itemId: string) => setDock(tabId, (d) => ({ ...d, activeId: itemId, open: true })),
   update: (tabId: string, itemId: string, patch: Partial<DockItem>) =>
-    setDock(tabId, (d) => ({ ...d, items: d.items.map((i) => (i.id === itemId ? ({ ...i, ...patch } as DockItem) : i)) })),
+    setDock(tabId, (d) => ({
+      ...d,
+      items: d.items.map((i) => (i.id === itemId ? ({ ...i, ...patch } as DockItem) : i)),
+    })),
   setOpen: (tabId: string, open: boolean) => setDock(tabId, (d) => ({ ...d, open })),
   setHeight: (tabId: string, height: number) => setDock(tabId, (d) => ({ ...d, height })),
   /** Move a dock item out into its own top-level tab. */
@@ -426,7 +434,7 @@ export const dock = {
 export function openSession(item: NewDockItem, opts?: { newTab?: boolean }) {
   const { tabs, activeId, open } = useTabs.getState();
   const host = tabs.find((t) => t.id === activeId);
-  const ctx = "context" in item ? item.context ?? null : null;
+  const ctx = "context" in item ? (item.context ?? null) : null;
   if (!opts?.newTab && isDockHost(host) && (!ctx || host.context === ctx)) {
     dock.add(host.id, item);
   } else {

@@ -1,5 +1,6 @@
 import { alertDialog } from "./components/Dialogs";
 import { useSettings } from "./settings";
+import { S } from "./strings";
 
 /** Downscale an image file to a 64px square (cover-cropped) PNG data URL, so settings stay small. */
 export async function iconDataUrl(file: File): Promise<string> {
@@ -36,7 +37,10 @@ export function pickClusterIcon(context: string) {
       await useSettings.getState().updateCluster(context, { icon: await iconDataUrl(file) });
     } catch (err) {
       console.error("icon decode failed", file.type, err);
-      alertDialog("Couldn't read that image", `${file.name} (${file.type || "unknown type"}, ${file.size} bytes)\n\n${err}`);
+      alertDialog(
+        S.cluster.iconReadFailed,
+        S.cluster.iconReadFailedDetail(file.name, file.type, file.size, String(err)),
+      );
     }
   };
   input.click();

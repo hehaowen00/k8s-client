@@ -8,6 +8,7 @@ import { YamlEditor } from "../components/YamlEditor";
 import { confirmDialog, toast } from "../components/Dialogs";
 import { TEMPLATES } from "../templates";
 import { Select } from "../components/Select";
+import { S } from "../strings";
 
 const SAMPLE = `apiVersion: v1
 kind: ConfigMap
@@ -39,8 +40,8 @@ export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
     setResult(null);
     try {
       const applied = await api.applyManifest(context, draft, tab.namespace);
-      setResult({ ok: true, lines: applied.map((a) => `${a} applied`) });
-      toast(`Applied ${applied.length} object${applied.length === 1 ? "" : "s"}`);
+      setResult({ ok: true, lines: applied.map(S.apply.appliedOne) });
+      toast(S.apply.applied(applied.length));
     } catch (e) {
       setResult({ ok: false, lines: [String(e)] });
     } finally {
@@ -51,7 +52,7 @@ export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
   return (
     <div className="apply-view">
       <div className="toolbar">
-        <h2 className="toolbar-title">Apply Manifest</h2>
+        <h2 className="toolbar-title">{S.apply.title}</h2>
         <Select
           className="select"
           value={context ?? ""}
@@ -67,9 +68,9 @@ export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
           className="select"
           value={tab.namespace ?? ""}
           onChange={(e) => update(tab.id, { namespace: e.target.value || null })}
-          title="Default namespace for objects without metadata.namespace"
+          title={S.apply.namespaceHint}
         >
-          <option value="">(default namespace)</option>
+          <option value="">{S.apply.defaultNamespace}</option>
           {namespaces.data?.map((n) => (
             <option key={n} value={n}>
               {n}
@@ -79,18 +80,22 @@ export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
         <Select
           className="select"
           value=""
-          title="Start from a template"
+          title={S.apply.templateHint}
           onChange={async (e) => {
             const t = TEMPLATES[e.target.value];
             if (!t) return;
             if (draft.trim() && draft !== t) {
-              const ok = await confirmDialog({ title: "Replace editor contents?", message: `Load the ${e.target.value} template?`, confirmLabel: "Load" });
+              const ok = await confirmDialog({
+                title: S.apply.replaceTitle,
+                message: S.apply.replaceMessage(e.target.value),
+                confirmLabel: S.apply.load,
+              });
               if (!ok) return;
             }
             setDraft(t);
           }}
         >
-          <option value="">Template</option>
+          <option value="">{S.apply.template}</option>
           {Object.keys(TEMPLATES).map((k) => (
             <option key={k} value={k}>
               {k}
@@ -98,9 +103,9 @@ export function ApplyView({ tab }: { tab: Extract<Tab, { kind: "apply" }> }) {
           ))}
         </Select>
         <div className="spacer" />
-        <span className="muted small">Server-side apply · {shortcut("S")}</span>
+        <span className="muted small">{S.apply.serverSide(shortcut("S"))}</span>
         <button className="btn btn-sm btn-primary" disabled={!context || busy} onClick={apply}>
-          {busy ? "Applying…" : "Apply"}
+          {busy ? S.apply.applying : S.apply.apply}
         </button>
       </div>
       {result && (

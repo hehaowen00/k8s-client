@@ -26,7 +26,8 @@ function cachedUsage(key: string, fetch: () => Promise<Usage[]>): Promise<Usage[
   return p;
 }
 
-const podKey = (context: string, namespace: string | null, selector = "", name = "") => `${context}|pods|${namespace ?? ""}|${selector}|${name}`;
+const podKey = (context: string, namespace: string | null, selector = "", name = "") =>
+  `${context}|pods|${namespace ?? ""}|${selector}|${name}`;
 
 export function podUsage(context: string, namespace: string | null, selector?: string | null): Promise<Usage[]> {
   return cachedUsage(podKey(context, namespace, selector ?? ""), () => api.podMetrics(context, namespace, selector));
@@ -36,7 +37,9 @@ export function podUsage(context: string, namespace: string | null, selector?: s
 function onePodUsage(context: string, namespace: string, pod: string): Promise<Usage | undefined> {
   const wide = freshUsage(podKey(context, namespace)) ?? freshUsage(podKey(context, null));
   if (wide) return wide.then((l) => l.find((u) => u.name === pod && (!u.namespace || u.namespace === namespace)));
-  return cachedUsage(podKey(context, namespace, "", pod), () => api.podMetrics(context, namespace, null, pod)).then((l) => l[0]);
+  return cachedUsage(podKey(context, namespace, "", pod), () => api.podMetrics(context, namespace, null, pod)).then(
+    (l) => l[0],
+  );
 }
 
 export function nodeUsage(context: string): Promise<Usage[]> {
@@ -66,7 +69,10 @@ export function useUsageMap(
     let cancelled = false;
     const scopes = nsKey === null ? [null] : nsKey ? nsKey.split(",") : [];
     const load = () =>
-      (kind === "pods" ? Promise.all(scopes.map((ns) => podUsage(context, ns))).then((l) => l.flat()) : nodeUsage(context)).then(
+      (kind === "pods"
+        ? Promise.all(scopes.map((ns) => podUsage(context, ns))).then((l) => l.flat())
+        : nodeUsage(context)
+      ).then(
         (list) => {
           if (cancelled) return;
           setMap(new Map(list.map((u) => [u.namespace ? `${u.namespace}/${u.name}` : u.name, u])));
@@ -165,7 +171,10 @@ export function useMetricSeries(context: string, spec: MetricSpec | null, active
           const end = Math.floor(Date.now() / 1000 / step) * step;
           const start = end - span + step;
           const from = have && have.end >= start ? have.end : start;
-          const merge = (old: Point[] | undefined, add: Point[]) => [...(old ?? []).filter((p) => p[0] >= start && p[0] < from), ...add];
+          const merge = (old: Point[] | undefined, add: Point[]) => [
+            ...(old ?? []).filter((p) => p[0] >= start && p[0] < from),
+            ...add,
+          ];
           try {
             const [cpu, memory] = await api.prometheusRange(context, spec.prometheus, from, end, step);
             if (cancelled) return;
@@ -258,7 +267,13 @@ function podNamePattern(kind: string, name: string): string {
 }
 
 /** All pods of a workload summed (metrics-server via selector; Prometheus via pod-name pattern). */
-export function workloadSpec(context: string, namespace: string, kind: string, name: string, selector: string): MetricSpec {
+export function workloadSpec(
+  context: string,
+  namespace: string,
+  kind: string,
+  name: string,
+  selector: string,
+): MetricSpec {
   const re = podNamePattern(kind, name);
   const f = podFilter(namespace, re);
   return {

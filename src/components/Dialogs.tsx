@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
+import { S } from "../strings";
 
 type Dialog =
   | {
@@ -63,11 +64,13 @@ export function promptDialog(opts: {
 }
 
 export function alertDialog(title: string, message: string): Promise<void> {
-  return new Promise((resolve) => show({ type: "confirm", title, message, alert: true, confirmLabel: "OK", resolve: () => resolve() }));
+  return new Promise((resolve) =>
+    show({ type: "confirm", title, message, alert: true, confirmLabel: S.common.ok, resolve: () => resolve() }),
+  );
 }
 
 /** The full text of an error, in a dialog it can be read and copied from. */
-export function errorDialog(message: string, title = "Error"): Promise<void> {
+export function errorDialog(message: string, title: string = S.common.error): Promise<void> {
   // The same failure repeated (e.g. a button clicked twice) shows once.
   const queued = useDialogs.getState().queue.find((d) => d.type === "error" && d.message === message);
   if (queued) return Promise.resolve();
@@ -83,10 +86,7 @@ export function toast(message: string, tone: "ok" | "bad" = "ok") {
   }
   const id = ++toastId;
   useDialogs.setState((s) => ({ toasts: [...s.toasts, { id, message, tone }] }));
-  setTimeout(
-    () => useDialogs.setState((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })),
-    3500,
-  );
+  setTimeout(() => useDialogs.setState((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) })), 3500);
 }
 
 export function DialogHost() {
@@ -147,30 +147,32 @@ export function DialogHost() {
                 />
                 <output>{value}</output>
               </div>
-            ) : dialog.type === "prompt" && (
-              <input
-                ref={inputRef}
-                className="input"
-                // type=number can't be select()ed in WebKit, so use text + inputMode.
-                type="text"
-                inputMode={dialog.inputType === "number" ? "numeric" : undefined}
-                value={value}
-                onChange={(e) => setValue(e.target.value)}
-              />
+            ) : (
+              dialog.type === "prompt" && (
+                <input
+                  ref={inputRef}
+                  className="input"
+                  // type=number can't be select()ed in WebKit, so use text + inputMode.
+                  type="text"
+                  inputMode={dialog.inputType === "number" ? "numeric" : undefined}
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                />
+              )
             )}
             <div className="modal-actions">
               {dialog.type === "error" && (
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => navigator.clipboard.writeText(dialog.message).then(() => toast("Copied"))}
+                  onClick={() => navigator.clipboard.writeText(dialog.message).then(() => toast(S.common.copied))}
                 >
-                  Copy
+                  {S.common.copy}
                 </button>
               )}
               {dialog.type !== "error" && !(dialog.type === "confirm" && dialog.alert) && (
                 <button type="button" className="btn" onClick={() => finish(false)}>
-                  Cancel
+                  {S.common.cancel}
                 </button>
               )}
               <button
@@ -178,7 +180,7 @@ export function DialogHost() {
                 type="submit"
                 className={`btn ${dialog.type === "confirm" && dialog.danger ? "btn-danger" : "btn-primary"}`}
               >
-                {dialog.type === "confirm" ? dialog.confirmLabel ?? "Confirm" : "OK"}
+                {dialog.type === "confirm" ? (dialog.confirmLabel ?? S.common.confirm) : S.common.ok}
               </button>
             </div>
           </form>

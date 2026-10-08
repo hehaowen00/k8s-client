@@ -10,6 +10,7 @@ use serde_json::Value;
 use tokio_util::sync::CancellationToken;
 
 use crate::state::{err, kerr, Result};
+use crate::strings;
 
 const BACKOFF_MIN: Duration = Duration::from_millis(500);
 const BACKOFF_MAX: Duration = Duration::from_secs(30);
@@ -82,8 +83,15 @@ pub(crate) async fn list_watch(
             }
         };
         list_backoff = Duration::from_secs(1);
-        let mut rv = list["metadata"]["resourceVersion"].as_str().unwrap_or_default().to_string();
-        let watch_accept = if list["kind"] == "Table" { accept } else { "application/json" };
+        let mut rv = list["metadata"]["resourceVersion"]
+            .as_str()
+            .unwrap_or_default()
+            .to_string();
+        let watch_accept = if list["kind"] == "Table" {
+            accept
+        } else {
+            "application/json"
+        };
         if !emit(Event::Listed(list)) {
             return;
         }
@@ -133,8 +141,12 @@ async fn watch(
     token: &CancellationToken,
     emit: &mut impl FnMut(Event) -> bool,
 ) -> Outcome {
-    let uri = format!("{url}watch=1&allowWatchBookmarks=true&resourceVersion={rv}&timeoutSeconds=290");
-    let req = match http::Request::get(uri).header(http::header::ACCEPT, accept).body(vec![]) {
+    let uri =
+        format!("{url}watch=1&allowWatchBookmarks=true&resourceVersion={rv}&timeoutSeconds=290");
+    let req = match http::Request::get(uri)
+        .header(http::header::ACCEPT, accept)
+        .body(vec![])
+    {
         Ok(r) => r,
         Err(e) => return Outcome::Relist(Some(e.to_string())),
     };
@@ -143,7 +155,7 @@ async fn watch(
         s = client.request_stream(req) => match s {
             Ok(s) => s,
             Err(kube::Error::Api(e)) if e.code == 410 => return Outcome::Relist(None),
-            Err(e) => return Outcome::Relist(Some(format!("watch failed: {}", kerr(e)))),
+            Err(e) => return Outcome::Relist(Some(strings::watch_failed(kerr(e)))),
         },
     };
     let mut lines = stream.lines();
@@ -163,8 +175,9 @@ async fn watch(
         let obj = ev["object"].take();
         let ty = ev["type"].as_str().unwrap_or_default();
         if ty == "ERROR" {
-            let msg = (obj["code"].as_i64() != Some(410))
-                .then(|| format!("watch failed: {}", obj["message"].as_str().unwrap_or("unknown error")));
+            let msg = (obj["code"].as_i64() != Some(410)).then(|| {
+                strings::watch_failed(obj["message"].as_str().unwrap_or(strings::UNKNOWN_ERROR))
+            });
             return Outcome::Relist(msg);
         }
         if let Some(r) = object_rv(&obj) {

@@ -29,7 +29,14 @@ export interface McpAccess {
   events: boolean;
 }
 
-export const NO_MCP: McpAccess = { enabled: false, resources: [], namespaces: [], objects: false, logs: false, events: false };
+export const NO_MCP: McpAccess = {
+  enabled: false,
+  resources: [],
+  namespaces: [],
+  objects: false,
+  logs: false,
+  events: false,
+};
 
 export interface Settings {
   kubeconfigFolders: string[];
