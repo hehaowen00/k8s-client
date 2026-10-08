@@ -3,6 +3,7 @@ import { shortcut } from "../keys";
 import { useEffect, useRef, useState } from "react";
 import { contextColor, tabContext, tabTitle, useTabs, type Tab, contextLabel } from "../store";
 import { openContextMenu } from "./ContextMenu";
+import { S } from "../strings";
 
 const ICONS: Record<Tab["kind"], string> = {
   home: "⌂",
@@ -22,7 +23,9 @@ const ICONS: Record<Tab["kind"], string> = {
 const OVERLAY_TITLEBAR = navigator.userAgent.includes("Mac");
 
 export function TabBar() {
-  const { tabs, activeId, splitId } = useTabs(useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, splitId: s.splitId })));
+  const { tabs, activeId, splitId } = useTabs(
+    useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, splitId: s.splitId })),
+  );
   const setSplit = useTabs((s) => s.setSplit);
   const activate = useTabs((s) => s.activate);
   const close = useTabs((s) => s.close);
@@ -62,8 +65,7 @@ export function TabBar() {
   };
 
   // Dropping on the dragged tab's own edges wouldn't move it, so don't promise a move.
-  const wouldMove = (i: number, after: boolean) =>
-    dragIdx !== null && dragIdx !== i && neighbour(i, after) !== dragIdx;
+  const wouldMove = (i: number, after: boolean) => dragIdx !== null && dragIdx !== i && neighbour(i, after) !== dragIdx;
 
   const drop = (i: number, after: boolean) => {
     const from = dragIdx;
@@ -136,14 +138,19 @@ export function TabBar() {
               }}
               onContextMenu={(e) =>
                 openContextMenu(e, [
-                  { label: "Duplicate Tab", onClick: () => duplicate(t) },
+                  { label: S.tabs.duplicate, onClick: () => duplicate(t) },
                   t.id === splitId
-                    ? { label: "Close Split", hint: shortcut("\\"), onClick: () => setSplit(null) }
-                    : { label: "Open in Right Split", hint: shortcut("\\"), disabled: t.id === activeId, onClick: () => setSplit(t.id) },
+                    ? { label: S.tabs.closeSplit, hint: shortcut("\\"), onClick: () => setSplit(null) }
+                    : {
+                        label: S.tabs.openInSplit,
+                        hint: shortcut("\\"),
+                        disabled: t.id === activeId,
+                        onClick: () => setSplit(t.id),
+                      },
                   { separator: true, label: "" },
-                  { label: "Close", hint: shortcut("W"), onClick: () => close(t.id) },
-                  { label: "Close Other Tabs", onClick: () => closeOthers(t.id) },
-                  { label: "Close Tabs to the Right", onClick: () => closeRight(t.id) },
+                  { label: S.common.close, hint: shortcut("W"), onClick: () => close(t.id) },
+                  { label: S.tabs.closeOthers, onClick: () => closeOthers(t.id) },
+                  { label: S.tabs.closeRight, onClick: () => closeRight(t.id) },
                 ])
               }
             >
@@ -154,7 +161,7 @@ export function TabBar() {
                 className="tab-close"
                 onPointerDown={(e) => e.stopPropagation()}
                 onClick={() => close(t.id)}
-                aria-label="Close tab"
+                aria-label={S.tabs.closeTab}
               >
                 ×
               </button>
@@ -164,8 +171,9 @@ export function TabBar() {
       </div>
       <button
         className={`tab-new ${tabs.find((t) => t.id === activeId)?.kind === "home" ? "active" : ""}`}
-        title={`New tab (${shortcut("T")})`}
-        onClick={() => open({ kind: "home" })}>
+        title={S.tabs.newTabHint(shortcut("T"))}
+        onClick={() => open({ kind: "home" })}
+      >
         +
       </button>
     </div>

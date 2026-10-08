@@ -1697,14 +1697,24 @@ mark {
   user-select: text;
   overflow-wrap: anywhere;
 }
-.markdown h1, .markdown h2, .markdown h3 {
+.markdown h1,
+.markdown h2,
+.markdown h3 {
   margin: 18px 0 8px;
   line-height: 1.25;
 }
-.markdown h1 { font-size: 20px; }
-.markdown h2 { font-size: 16px; }
-.markdown h3 { font-size: 14px; }
-.markdown a { color: var(--accent); }
+.markdown h1 {
+  font-size: 20px;
+}
+.markdown h2 {
+  font-size: 16px;
+}
+.markdown h3 {
+  font-size: 14px;
+}
+.markdown a {
+  color: var(--accent);
+}
 .markdown code {
   font-family: var(--mono);
   font-size: 12px;
@@ -1719,10 +1729,22 @@ mark {
   padding: 10px;
   overflow: auto;
 }
-.markdown pre code { background: none; padding: 0; }
-.markdown table { border-collapse: collapse; margin: 8px 0; }
-.markdown th, .markdown td { border: 1px solid var(--border); padding: 4px 8px; }
-.markdown img { max-width: 100%; }
+.markdown pre code {
+  background: none;
+  padding: 0;
+}
+.markdown table {
+  border-collapse: collapse;
+  margin: 8px 0;
+}
+.markdown th,
+.markdown td {
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+}
+.markdown img {
+  max-width: 100%;
+}
 
 /* ------------------------------------------------------------ light theme */
 
@@ -2421,7 +2443,9 @@ button.ns-option {
   border-radius: 4px;
   background: var(--bg);
   color: #fff;
-  transition: background 0.1s, border-color 0.1s;
+  transition:
+    background 0.1s,
+    border-color 0.1s;
 }
 .checkbox:hover:not(:disabled) .checkbox-box {
   border-color: var(--text-dim);

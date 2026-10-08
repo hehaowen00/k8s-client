@@ -12,6 +12,7 @@ use serde_json::Value;
 use tauri::State;
 
 use crate::state::{err, kerr, AppState, Result};
+use crate::strings;
 
 /// Parse a Kubernetes quantity ("250m", "1.5", "128Mi", "1e3", "12345n") to a plain number
 /// (cores for CPU, bytes for memory).
@@ -51,7 +52,10 @@ pub fn parse_quantity(q: &str) -> f64 {
 }
 
 pub(crate) fn qty(map: &Option<BTreeMap<String, Quantity>>, key: &str) -> f64 {
-    map.as_ref().and_then(|m| m.get(key)).map(|q| parse_quantity(&q.0)).unwrap_or(0.0)
+    map.as_ref()
+        .and_then(|m| m.get(key))
+        .map(|q| parse_quantity(&q.0))
+        .unwrap_or(0.0)
 }
 
 #[derive(Serialize)]
@@ -91,7 +95,11 @@ fn pod_usage(item: &Value) -> Usage {
         .flatten()
         .map(|c| {
             let (cpu, memory) = usage_of(&c["usage"]);
-            ContainerUsage { name: c["name"].as_str().unwrap_or_default().into(), cpu, memory }
+            ContainerUsage {
+                name: c["name"].as_str().unwrap_or_default().into(),
+                cpu,
+                memory,
+            }
         })
         .collect();
     Usage {
@@ -115,11 +123,21 @@ fn node_usage(item: &Value) -> Usage {
 }
 
 /// A list, or one object when `name` is set (empty if metrics-server has nothing for it yet).
-async fn usage_list(client: &Client, path: &str, name: bool, parse: fn(&Value) -> Usage) -> Result<Vec<Usage>> {
+async fn usage_list(
+    client: &Client,
+    path: &str,
+    name: bool,
+    parse: fn(&Value) -> Usage,
+) -> Result<Vec<Usage>> {
     let req = http::Request::get(path).body(vec![]).map_err(err)?;
     match client.request::<Value>(req).await {
         Ok(v) if name => Ok(vec![parse(&v)]),
-        Ok(v) => Ok(v["items"].as_array().into_iter().flatten().map(parse).collect()),
+        Ok(v) => Ok(v["items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(parse)
+            .collect()),
         Err(kube::Error::Api(e)) if name && e.code == 404 => Ok(vec![]),
         Err(e) => Err(kerr(e)),
     }
@@ -139,7 +157,9 @@ pub async fn pod_metrics(
     let ns = namespace.filter(|n| !n.is_empty());
     let name = name.filter(|n| !n.is_empty());
     let mut path = match (&ns, &name) {
-        (Some(ns), Some(name)) => format!("/apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods/{name}"),
+        (Some(ns), Some(name)) => {
+            format!("/apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods/{name}")
+        }
         (Some(ns), None) => format!("/apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods"),
         (None, _) => "/apis/metrics.k8s.io/v1beta1/pods".into(),
     };
@@ -152,18 +172,40 @@ pub async fn pod_metrics(
 }
 
 #[tauri::command]
-pub async fn node_metrics(state: State<'_, AppState>, context: String, name: Option<String>) -> Result<Vec<Usage>> {
+pub async fn node_metrics(
+    state: State<'_, AppState>,
+    context: String,
+    name: Option<String>,
+) -> Result<Vec<Usage>> {
     let client = state.client(&context).await?;
     match name.filter(|n| !n.is_empty()) {
-        Some(n) => usage_list(&client, &format!("/apis/metrics.k8s.io/v1beta1/nodes/{n}"), true, node_usage).await,
-        None => usage_list(&client, "/apis/metrics.k8s.io/v1beta1/nodes", false, node_usage).await,
+        Some(n) => {
+            usage_list(
+                &client,
+                &format!("/apis/metrics.k8s.io/v1beta1/nodes/{n}"),
+                true,
+                node_usage,
+            )
+            .await
+        }
+        None => {
+            usage_list(
+                &client,
+                "/apis/metrics.k8s.io/v1beta1/nodes",
+                false,
+                node_usage,
+            )
+            .await
+        }
     }
 }
 
 fn urlencode(s: &str) -> String {
     s.bytes()
         .map(|b| match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => (b as char).to_string(),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
             _ => format!("%{b:02X}"),
         })
         .collect()
@@ -209,20 +251,33 @@ async fn detect_prometheus(client: &Client) -> Option<PrometheusTarget> {
         ("default", "prometheus-server", 80),
     ];
     for (ns, svc, port) in known {
-        let t = PrometheusTarget { namespace: ns.into(), service: svc.into(), port };
+        let t = PrometheusTarget {
+            namespace: ns.into(),
+            service: svc.into(),
+            port,
+        };
         if prometheus_ok(client, &t).await {
             return Some(t);
         }
     }
     // Otherwise any service that looks like Prometheus.
-    let services = Api::<Service>::all(client.clone()).list(&ListParams::default().match_any()).await.ok()?;
+    let services = Api::<Service>::all(client.clone())
+        .list(&ListParams::default().match_any())
+        .await
+        .ok()?;
     for s in services.items {
         let name = s.metadata.name.clone().unwrap_or_default();
         let labels = s.metadata.labels.clone().unwrap_or_default();
         let looks = name.contains("prometheus")
             || labels.values().any(|v| v == "prometheus")
-            || labels.get("app.kubernetes.io/name").is_some_and(|v| v.contains("prometheus"));
-        if !looks || name.contains("alertmanager") || name.contains("operator") || name.contains("pushgateway") {
+            || labels
+                .get("app.kubernetes.io/name")
+                .is_some_and(|v| v.contains("prometheus"));
+        if !looks
+            || name.contains("alertmanager")
+            || name.contains("operator")
+            || name.contains("pushgateway")
+        {
             continue;
         }
         for p in s.spec.and_then(|sp| sp.ports).unwrap_or_default() {
@@ -268,7 +323,7 @@ pub async fn prometheus_range(
 ) -> Result<Vec<Vec<(f64, f64)>>> {
     let target = match state.prometheus(&context) {
         Some(Some(t)) => t,
-        _ => return Err("prometheus not available".into()),
+        _ => return Err(strings::PROMETHEUS_NOT_AVAILABLE.into()),
     };
     let client = state.client(&context).await?;
     let mut out = Vec::new();
@@ -279,7 +334,10 @@ pub async fn prometheus_range(
         ));
         let v = raw_json(&client, &path).await?;
         if v["status"] != "success" {
-            return Err(v["error"].as_str().unwrap_or("prometheus query failed").to_string());
+            return Err(v["error"]
+                .as_str()
+                .unwrap_or(strings::PROMETHEUS_QUERY_FAILED)
+                .to_string());
         }
         let points = v["data"]["result"][0]["values"]
             .as_array()

@@ -23,6 +23,7 @@ use tokio_util::sync::CancellationToken;
 use crate::kube_ops::{self, ResourceInfo};
 use crate::settings::McpAccess;
 use crate::state::{err, kerr, AppState, Result};
+use crate::strings;
 
 const MAX_ROWS: usize = 500;
 const LOG_SIZE: usize = 500;
@@ -84,7 +85,11 @@ pub fn restart(app: &AppHandle) {
             s.mcp_token = Some(uuid::Uuid::new_v4().simple().to_string());
             let _ = crate::settings::save(&s);
         }
-        (s.mcp_enabled, s.mcp_port, s.mcp_token.clone().unwrap_or_default())
+        (
+            s.mcp_enabled,
+            s.mcp_port,
+            s.mcp_token.clone().unwrap_or_default(),
+        )
     };
     if !enabled {
         *srv.status.lock().unwrap() = None;
@@ -108,7 +113,7 @@ pub fn restart(app: &AppHandle) {
         let listener = match bound {
             Ok(l) => l,
             Err(e) => {
-                *srv.status.lock().unwrap() = Some(Err(format!("can't listen on 127.0.0.1:{port}: {e}")));
+                *srv.status.lock().unwrap() = Some(Err(strings::cannot_listen(port, e)));
                 let _ = app.emit("mcp-status", ());
                 return;
             }
@@ -122,8 +127,10 @@ pub fn restart(app: &AppHandle) {
             };
             let (app, token, cancel) = (app.clone(), token.clone(), cancel.clone());
             tokio::spawn(async move {
-                let svc = hyper::service::service_fn(move |req| handle(app.clone(), token.clone(), req));
-                let conn = hyper::server::conn::http1::Builder::new().serve_connection(TokioIo::new(stream), svc);
+                let svc =
+                    hyper::service::service_fn(move |req| handle(app.clone(), token.clone(), req));
+                let conn = hyper::server::conn::http1::Builder::new()
+                    .serve_connection(TokioIo::new(stream), svc);
                 tokio::select! {
                     _ = cancel.cancelled() => {}
                     _ = conn => {}
@@ -134,7 +141,11 @@ pub fn restart(app: &AppHandle) {
 }
 
 fn reply(code: StatusCode, body: Value) -> Response<Full<Bytes>> {
-    let bytes = if body.is_null() { vec![] } else { serde_json::to_vec(&body).unwrap_or_default() };
+    let bytes = if body.is_null() {
+        vec![]
+    } else {
+        serde_json::to_vec(&body).unwrap_or_default()
+    };
     Response::builder()
         .status(code)
         .header("content-type", "application/json")
@@ -142,7 +153,11 @@ fn reply(code: StatusCode, body: Value) -> Response<Full<Bytes>> {
         .unwrap()
 }
 
-async fn handle(app: AppHandle, token: String, req: Request<Incoming>) -> std::result::Result<Response<Full<Bytes>>, Infallible> {
+async fn handle(
+    app: AppHandle,
+    token: String,
+    req: Request<Incoming>,
+) -> std::result::Result<Response<Full<Bytes>>, Infallible> {
     // DNS-rebinding guard (the spec requires Origin validation); non-browser clients send no Origin.
     if let Some(origin) = req.headers().get("origin").and_then(|v| v.to_str().ok()) {
         let local = ["http://localhost", "http://127.0.0.1"]
@@ -153,9 +168,15 @@ async fn handle(app: AppHandle, token: String, req: Request<Incoming>) -> std::r
         }
     }
     // ponytail: plain string compare; constant-time compare if this ever listens beyond loopback.
-    let auth = req.headers().get("authorization").and_then(|v| v.to_str().ok());
+    let auth = req
+        .headers()
+        .get("authorization")
+        .and_then(|v| v.to_str().ok());
     if auth != Some(&format!("Bearer {token}")) {
-        return Ok(reply(StatusCode::UNAUTHORIZED, json!({"error": "missing or wrong bearer token"})));
+        return Ok(reply(
+            StatusCode::UNAUTHORIZED,
+            json!({"error": "missing or wrong bearer token"}),
+        ));
     }
     if req.uri().path() != "/mcp" {
         return Ok(reply(StatusCode::NOT_FOUND, Value::Null));
@@ -168,24 +189,43 @@ async fn handle(app: AppHandle, token: String, req: Request<Incoming>) -> std::r
         return Ok(reply(StatusCode::BAD_REQUEST, Value::Null));
     };
     let Ok(msg) = serde_json::from_slice::<Value>(&body.to_bytes()) else {
-        return Ok(reply(StatusCode::BAD_REQUEST, json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "parse error"}})));
+        return Ok(reply(
+            StatusCode::BAD_REQUEST,
+            json!({"jsonrpc": "2.0", "id": null, "error": {"code": -32700, "message": "parse error"}}),
+        ));
     };
     // Notifications and responses carry no id.
     let Some(id) = msg.get("id").cloned() else {
         return Ok(reply(StatusCode::ACCEPTED, Value::Null));
     };
-    let out = match rpc(&app, msg["method"].as_str().unwrap_or_default(), &msg["params"]).await {
+    let out = match rpc(
+        &app,
+        msg["method"].as_str().unwrap_or_default(),
+        &msg["params"],
+    )
+    .await
+    {
         Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-        Err((code, message)) => json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}}),
+        Err((code, message)) => {
+            json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
+        }
     };
     Ok(reply(StatusCode::OK, out))
 }
 
-async fn rpc(app: &AppHandle, method: &str, params: &Value) -> std::result::Result<Value, (i64, String)> {
+async fn rpc(
+    app: &AppHandle,
+    method: &str,
+    params: &Value,
+) -> std::result::Result<Value, (i64, String)> {
     match method {
         "initialize" => {
             let asked = params["protocolVersion"].as_str().unwrap_or_default();
-            let version = if ["2025-06-18", "2025-03-26", "2024-11-05"].contains(&asked) { asked } else { "2025-06-18" };
+            let version = if ["2025-06-18", "2025-03-26", "2024-11-05"].contains(&asked) {
+                asked
+            } else {
+                "2025-06-18"
+            };
             Ok(json!({
                 "protocolVersion": version,
                 "capabilities": {"tools": {}},
@@ -206,7 +246,9 @@ async fn rpc(app: &AppHandle, method: &str, params: &Value) -> std::result::Resu
             let name = params["name"].as_str().unwrap_or_default();
             let args = &params["arguments"];
             let res = if disabled_tools(app).iter().any(|n| n == name) {
-                Err(Fail::Denied(format!("tool \"{name}\" is turned off in Kube Portal")))
+                Err(Fail::Denied(format!(
+                    "tool \"{name}\" is turned off in Kube Portal"
+                )))
             } else {
                 call_tool(app, name, args).await
             };
@@ -217,14 +259,20 @@ async fn rpc(app: &AppHandle, method: &str, params: &Value) -> std::result::Resu
                 Err(Fail::Denied(m)) => ("denied", m.clone(), m, true),
                 Err(Fail::Error(m)) => ("error", m.clone(), m, true),
             };
-            record(app, AccessEntry {
-                time_ms: SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0),
-                tool: name.to_string(),
-                cluster,
-                target,
-                outcome: outcome.into(),
-                detail,
-            });
+            record(
+                app,
+                AccessEntry {
+                    time_ms: SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map(|d| d.as_millis() as u64)
+                        .unwrap_or(0),
+                    tool: name.to_string(),
+                    cluster,
+                    target,
+                    outcome: outcome.into(),
+                    detail,
+                },
+            );
             Ok(json!({"content": [{"type": "text", "text": text}], "isError": is_error}))
         }
         _ => Err((-32601, format!("method not found: {method}"))),
@@ -232,7 +280,12 @@ async fn rpc(app: &AppHandle, method: &str, params: &Value) -> std::result::Resu
 }
 
 fn disabled_tools(app: &AppHandle) -> Vec<String> {
-    app.state::<AppState>().settings.lock().unwrap().mcp_disabled_tools.clone()
+    app.state::<AppState>()
+        .settings
+        .lock()
+        .unwrap()
+        .mcp_disabled_tools
+        .clone()
 }
 
 fn record(app: &AppHandle, entry: AccessEntry) {
@@ -248,20 +301,57 @@ fn record(app: &AppHandle, entry: AccessEntry) {
 /// Short "what was asked for" for the access log.
 fn describe(tool: &str, a: &Value) -> String {
     let s = |k: &str| a[k].as_str().unwrap_or_default();
-    let ns = |k: &str| if s(k).is_empty() { String::new() } else { format!(" in {}", s(k)) };
+    let ns = |k: &str| {
+        if s(k).is_empty() {
+            String::new()
+        } else {
+            format!(" in {}", s(k))
+        }
+    };
     match tool {
-        "list_resources" => format!("{}{}{}", s("resource"), ns("namespace"), if s("labelSelector").is_empty() { String::new() } else { format!(" [{}]", s("labelSelector")) }),
+        "list_resources" => format!(
+            "{}{}{}",
+            s("resource"),
+            ns("namespace"),
+            if s("labelSelector").is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", s("labelSelector"))
+            }
+        ),
         "get_resource" => format!("{}/{}{}", s("resource"), s("name"), ns("namespace")),
         "get_deployment" => format!("deployments.apps/{}{}", s("name"), ns("namespace")),
-        "get_logs" => format!("{}{}{}", if s("deployment").is_empty() { format!("pod/{}", s("pod")) } else { format!("deployment/{}", s("deployment")) }, if s("container").is_empty() { String::new() } else { format!(" ({})", s("container")) }, ns("namespace")),
-        "list_events" => format!("events{}{}", if s("name").is_empty() { String::new() } else { format!(" for {}", s("name")) }, ns("namespace")),
+        "get_logs" => format!(
+            "{}{}{}",
+            if s("deployment").is_empty() {
+                format!("pod/{}", s("pod"))
+            } else {
+                format!("deployment/{}", s("deployment"))
+            },
+            if s("container").is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", s("container"))
+            },
+            ns("namespace")
+        ),
+        "list_events" => format!(
+            "events{}{}",
+            if s("name").is_empty() {
+                String::new()
+            } else {
+                format!(" for {}", s("name"))
+            },
+            ns("namespace")
+        ),
         _ => String::new(),
     }
 }
 
 fn tools() -> Value {
     let cluster = json!({"type": "string", "description": "Cluster id from list_clusters"});
-    let ns = json!({"type": "string", "description": "Namespace; omit for every allowed namespace"});
+    let ns =
+        json!({"type": "string", "description": "Namespace; omit for every allowed namespace"});
     json!([
         {
             "name": "list_clusters",
@@ -329,7 +419,11 @@ fn need<'a>(a: &'a Value, k: &str) -> std::result::Result<&'a str, Fail> {
 
 /// Names and namespaces are pasted into API paths, so anything that could change the path is refused.
 fn check_segment(k: &str, v: &str) -> std::result::Result<(), Fail> {
-    if v == "." || v == ".." || v.chars().any(|c| matches!(c, '/' | '?' | '#' | '%' | '\\') || c.is_control()) {
+    if v == "."
+        || v == ".."
+        || v.chars()
+            .any(|c| matches!(c, '/' | '?' | '#' | '%' | '\\') || c.is_control())
+    {
         return Err(Fail::Denied(format!("invalid {k}: \"{v}\"")));
     }
     Ok(())
@@ -348,7 +442,10 @@ fn redact_secret(v: &mut Value) {
             m.values_mut().for_each(|x| *x = json!("<redacted>"));
         }
     }
-    if let Some(ann) = v.pointer_mut("/metadata/annotations").and_then(Value::as_object_mut) {
+    if let Some(ann) = v
+        .pointer_mut("/metadata/annotations")
+        .and_then(Value::as_object_mut)
+    {
         if let Some(x) = ann.get_mut("kubectl.kubernetes.io/last-applied-configuration") {
             *x = json!("<redacted>");
         }
@@ -368,7 +465,9 @@ fn access(state: &AppState, cluster: &str) -> std::result::Result<McpAccess, Fai
     let a = state.cluster_settings(cluster).mcp;
     // Unknown clusters look the same as unshared ones.
     if !a.enabled {
-        return Err(Fail::Denied(format!("cluster \"{cluster}\" is not shared over MCP")));
+        return Err(Fail::Denied(format!(
+            "cluster \"{cluster}\" is not shared over MCP"
+        )));
     }
     Ok(a)
 }
@@ -383,7 +482,10 @@ fn check_ns(a: &McpAccess, ns: &str) -> std::result::Result<(), Fail> {
 }
 
 /// Namespaces to query: the one asked for (if allowed), else all (None) or each allowed one.
-fn target_namespaces(a: &McpAccess, asked: Option<&str>) -> std::result::Result<Vec<Option<String>>, Fail> {
+fn target_namespaces(
+    a: &McpAccess,
+    asked: Option<&str>,
+) -> std::result::Result<Vec<Option<String>>, Fail> {
     match asked {
         Some(ns) => check_ns(a, ns).map(|_| vec![Some(ns.to_string())]),
         None if a.namespaces.is_empty() => Ok(vec![None]),
@@ -391,9 +493,16 @@ fn target_namespaces(a: &McpAccess, asked: Option<&str>) -> std::result::Result<
     }
 }
 
-async fn resolve(state: &AppState, cluster: &str, a: &McpAccess, id: &str) -> std::result::Result<ResourceInfo, Fail> {
+async fn resolve(
+    state: &AppState,
+    cluster: &str,
+    a: &McpAccess,
+    id: &str,
+) -> std::result::Result<ResourceInfo, Fail> {
     if !a.resources.iter().any(|r| r == id) {
-        return Err(Fail::Denied(format!("resource type \"{id}\" is not shared on this cluster")));
+        return Err(Fail::Denied(format!(
+            "resource type \"{id}\" is not shared on this cluster"
+        )));
     }
     let all = kube_ops::discover_resources(state, cluster, false).await?;
     all.iter()
@@ -405,8 +514,17 @@ async fn resolve(state: &AppState, cluster: &str, a: &McpAccess, id: &str) -> st
 /// Label selector string for a deployment's pods.
 fn deployment_selector(d: &Deployment) -> std::result::Result<String, Fail> {
     let sel = d.spec.as_ref().map(|s| &s.selector);
-    let mut parts: Vec<String> = sel.and_then(|s| s.match_labels.as_ref()).into_iter().flatten().map(|(k, v)| format!("{k}={v}")).collect();
-    for e in sel.and_then(|s| s.match_expressions.as_ref()).into_iter().flatten() {
+    let mut parts: Vec<String> = sel
+        .and_then(|s| s.match_labels.as_ref())
+        .into_iter()
+        .flatten()
+        .map(|(k, v)| format!("{k}={v}"))
+        .collect();
+    for e in sel
+        .and_then(|s| s.match_expressions.as_ref())
+        .into_iter()
+        .flatten()
+    {
         let values = e.values.clone().unwrap_or_default().join(",");
         parts.push(match e.operator.as_str() {
             "In" => format!("{} in ({values})", e.key),
@@ -422,7 +540,12 @@ fn deployment_selector(d: &Deployment) -> std::result::Result<String, Fail> {
 }
 
 fn default_container(p: &Pod) -> Option<String> {
-    let ann = p.metadata.annotations.as_ref().and_then(|a| a.get("kubectl.kubernetes.io/default-container")).cloned();
+    let ann = p
+        .metadata
+        .annotations
+        .as_ref()
+        .and_then(|a| a.get("kubectl.kubernetes.io/default-container"))
+        .cloned();
     ann.or_else(|| p.spec.as_ref()?.containers.first().map(|c| c.name.clone()))
 }
 
@@ -459,7 +582,11 @@ fn deployment_summary(d: &Deployment) -> Value {
 }
 
 fn pod_summary(p: &Pod) -> Value {
-    let statuses = p.status.as_ref().and_then(|s| s.container_statuses.clone()).unwrap_or_default();
+    let statuses = p
+        .status
+        .as_ref()
+        .and_then(|s| s.container_statuses.clone())
+        .unwrap_or_default();
     json!({
         "name": p.metadata.name,
         "phase": p.status.as_ref().and_then(|s| s.phase.clone()),
@@ -496,7 +623,11 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
             let cluster = need(a, "cluster")?;
             let acc = access(state, cluster)?;
             let res = resolve(state, cluster, &acc, need(a, "resource")?).await?;
-            let targets = if res.namespaced { target_namespaces(&acc, arg(a, "namespace"))? } else { vec![None] };
+            let targets = if res.namespaced {
+                target_namespaces(&acc, arg(a, "namespace"))?
+            } else {
+                vec![None]
+            };
             let client = state.client(cluster).await?;
             let mut columns = Vec::new();
             let mut rows = Vec::new();
@@ -519,15 +650,23 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                     Some(v)
                 })
                 .collect();
-            let names: Vec<Value> = columns.into_iter().filter_map(|c| serde_json::to_value(c).ok().map(|v| v["name"].clone())).collect();
+            let names: Vec<Value> = columns
+                .into_iter()
+                .filter_map(|c| serde_json::to_value(c).ok().map(|v| v["name"].clone()))
+                .collect();
             let out = json!({"columns": names, "rows": rows, "total": total, "truncated": total > MAX_ROWS});
-            Ok((serde_json::to_string(&out).map_err(err)?, format!("{total} row(s)")))
+            Ok((
+                serde_json::to_string(&out).map_err(err)?,
+                format!("{total} row(s)"),
+            ))
         }
         "get_resource" => {
             let cluster = need(a, "cluster")?;
             let acc = access(state, cluster)?;
             if !acc.objects {
-                return Err(Fail::Denied("full objects are not shared on this cluster; use list_resources".into()));
+                return Err(Fail::Denied(
+                    "full objects are not shared on this cluster; use list_resources".into(),
+                ));
             }
             let res = resolve(state, cluster, &acc, need(a, "resource")?).await?;
             let ns = if res.namespaced {
@@ -538,7 +677,11 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                 None
             };
             let client = state.client(cluster).await?;
-            let obj = res.api(client, ns).get(need_segment(a, "name")?).await.map_err(kerr)?;
+            let obj = res
+                .api(client, ns)
+                .get(need_segment(a, "name")?)
+                .await
+                .map_err(kerr)?;
             let mut v = serde_json::to_value(obj).map_err(err)?;
             kube_ops::strip_noise(&mut v);
             if res.kind == "Secret" || v["kind"] == "Secret" {
@@ -565,30 +708,54 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
             };
             let pods: Api<Pod> = Api::namespaced(client.clone(), ns);
             let Some(dep) = arg(a, "deployment") else {
-                let text = pods.logs(need_segment(a, "pod")?, &lp).await.map_err(kerr)?;
+                let text = pods
+                    .logs(need_segment(a, "pod")?, &lp)
+                    .await
+                    .map_err(kerr)?;
                 let detail = format!("{} line(s)", text.lines().count());
                 return Ok((text, detail));
             };
             check_segment("deployment", dep)?;
-            let d = Api::<Deployment>::namespaced(client, ns).get(dep).await.map_err(kerr)?;
-            let mut list = pods.list(&ListParams::default().match_any().labels(&deployment_selector(&d)?)).await.map_err(kerr)?.items;
+            let d = Api::<Deployment>::namespaced(client, ns)
+                .get(dep)
+                .await
+                .map_err(kerr)?;
+            let mut list = pods
+                .list(
+                    &ListParams::default()
+                        .match_any()
+                        .labels(&deployment_selector(&d)?),
+                )
+                .await
+                .map_err(kerr)?
+                .items;
             list.sort_by(|x, y| x.metadata.name.cmp(&y.metadata.name));
             let total = list.len();
             let reads = list.iter().take(MAX_LOG_PODS).map(|p| {
                 let name = p.metadata.name.clone().unwrap_or_default();
-                let lp = LogParams { container: lp.container.clone().or_else(|| default_container(p)), ..lp.clone() };
+                let lp = LogParams {
+                    container: lp.container.clone().or_else(|| default_container(p)),
+                    ..lp.clone()
+                };
                 let pods = &pods;
                 async move { (pods.logs(&name, &lp).await, name) }
             });
             let mut out = String::new();
             for (res, name) in futures::future::join_all(reads).await {
                 match res {
-                    Ok(text) => text.lines().for_each(|l| out.push_str(&format!("[{name}] {l}\n"))),
-                    Err(e) => out.push_str(&format!("[{name}] <could not read logs: {}>\n", kerr(e))),
+                    Ok(text) => text
+                        .lines()
+                        .for_each(|l| out.push_str(&format!("[{name}] {l}\n"))),
+                    Err(e) => {
+                        out.push_str(&format!("[{name}] <could not read logs: {}>\n", kerr(e)))
+                    }
                 }
             }
             if total > MAX_LOG_PODS {
-                out.push_str(&format!("<{} more pod(s) not shown>\n", total - MAX_LOG_PODS));
+                out.push_str(&format!(
+                    "<{} more pod(s) not shown>\n",
+                    total - MAX_LOG_PODS
+                ));
             }
             Ok((out, format!("{} pod(s)", total.min(MAX_LOG_PODS))))
         }
@@ -596,18 +763,33 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
             let cluster = need(a, "cluster")?;
             let acc = access(state, cluster)?;
             if !acc.resources.iter().any(|r| r == "deployments.apps") {
-                return Err(Fail::Denied("resource type \"deployments.apps\" is not shared on this cluster".into()));
+                return Err(Fail::Denied(
+                    "resource type \"deployments.apps\" is not shared on this cluster".into(),
+                ));
             }
             let ns = need(a, "namespace")?;
             check_ns(&acc, ns)?;
             let client = state.client(cluster).await?;
-            let d = Api::<Deployment>::namespaced(client.clone(), ns).get(need_segment(a, "name")?).await.map_err(kerr)?;
+            let d = Api::<Deployment>::namespaced(client.clone(), ns)
+                .get(need_segment(a, "name")?)
+                .await
+                .map_err(kerr)?;
             let mut out = deployment_summary(&d);
             if acc.resources.iter().any(|r| r == "pods") {
-                let list = Api::<Pod>::namespaced(client, ns).list(&ListParams::default().match_any().labels(&deployment_selector(&d)?)).await.map_err(kerr)?;
+                let list = Api::<Pod>::namespaced(client, ns)
+                    .list(
+                        &ListParams::default()
+                            .match_any()
+                            .labels(&deployment_selector(&d)?),
+                    )
+                    .await
+                    .map_err(kerr)?;
                 out["pods"] = list.items.iter().map(pod_summary).collect();
             }
-            Ok((serde_json::to_string_pretty(&out).map_err(err)?, out["replicas"].to_string()))
+            Ok((
+                serde_json::to_string_pretty(&out).map_err(err)?,
+                out["replicas"].to_string(),
+            ))
         }
         "list_events" => {
             let cluster = need(a, "cluster")?;
@@ -629,9 +811,16 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                 events.extend(api.list(&lp).await.map_err(kerr)?.items);
             }
             let when = |e: &Event| {
-                e.last_timestamp.as_ref().map(|t| t.0.to_string())
+                e.last_timestamp
+                    .as_ref()
+                    .map(|t| t.0.to_string())
                     .or_else(|| e.event_time.as_ref().map(|t| t.0.to_string()))
-                    .or_else(|| e.metadata.creation_timestamp.as_ref().map(|t| t.0.to_string()))
+                    .or_else(|| {
+                        e.metadata
+                            .creation_timestamp
+                            .as_ref()
+                            .map(|t| t.0.to_string())
+                    })
                     .unwrap_or_default()
             };
             events.sort_by_key(|e| std::cmp::Reverse(when(e)));
@@ -648,7 +837,10 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                         e.reason.as_deref().unwrap_or_default(),
                         o.kind.as_deref().unwrap_or_default(),
                         o.name.as_deref().unwrap_or_default(),
-                        o.namespace.as_deref().map(|n| format!(" ({n})")).unwrap_or_default(),
+                        o.namespace
+                            .as_deref()
+                            .map(|n| format!(" ({n})"))
+                            .unwrap_or_default(),
                         e.count.unwrap_or(1),
                         e.message.as_deref().unwrap_or_default().trim(),
                     )
@@ -667,9 +859,21 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
 #[tauri::command]
 pub fn mcp_status(srv: State<'_, McpServer>) -> McpStatus {
     match srv.status.lock().unwrap().clone() {
-        None => McpStatus { running: false, url: None, error: None },
-        Some(Ok(url)) => McpStatus { running: true, url: Some(url), error: None },
-        Some(Err(e)) => McpStatus { running: false, url: None, error: Some(e) },
+        None => McpStatus {
+            running: false,
+            url: None,
+            error: None,
+        },
+        Some(Ok(url)) => McpStatus {
+            running: true,
+            url: Some(url),
+            error: None,
+        },
+        Some(Err(e)) => McpStatus {
+            running: false,
+            url: None,
+            error: Some(e),
+        },
     }
 }
 
@@ -702,19 +906,45 @@ mod tests {
 
     #[test]
     fn namespace_rules() {
-        let all = McpAccess { enabled: true, ..Default::default() };
-        let some = McpAccess { enabled: true, namespaces: vec!["a".into(), "b".into()], ..Default::default() };
-        assert!(matches!(target_namespaces(&all, None).ok().as_deref(), Some([None])));
-        assert!(matches!(target_namespaces(&all, Some("x")).ok().as_deref(), Some([Some(n)]) if n == "x"));
+        let all = McpAccess {
+            enabled: true,
+            ..Default::default()
+        };
+        let some = McpAccess {
+            enabled: true,
+            namespaces: vec!["a".into(), "b".into()],
+            ..Default::default()
+        };
+        assert!(matches!(
+            target_namespaces(&all, None).ok().as_deref(),
+            Some([None])
+        ));
+        assert!(
+            matches!(target_namespaces(&all, Some("x")).ok().as_deref(), Some([Some(n)]) if n == "x")
+        );
         assert_eq!(target_namespaces(&some, None).ok().unwrap().len(), 2);
-        assert!(matches!(target_namespaces(&some, Some("x")), Err(Fail::Denied(_))));
+        assert!(matches!(
+            target_namespaces(&some, Some("x")),
+            Err(Fail::Denied(_))
+        ));
         assert!(check_ns(&some, "b").is_ok());
         for bad in ["kube-system/secrets/x", "a?b", "a#b", "a%2Fb", "..", "a\\b"] {
             assert!(matches!(check_ns(&all, bad), Err(Fail::Denied(_))), "{bad}");
         }
         assert!(check_segment("name", "system:node-proxier").is_ok());
-        let core = ResourceInfo { group: "".into(), version: "v1".into(), kind: "Pod".into(), plural: "pods".into(), namespaced: true, verbs: vec![] };
-        let apps = ResourceInfo { group: "apps".into(), plural: "deployments".into(), ..core.clone() };
+        let core = ResourceInfo {
+            group: "".into(),
+            version: "v1".into(),
+            kind: "Pod".into(),
+            plural: "pods".into(),
+            namespaced: true,
+            verbs: vec![],
+        };
+        let apps = ResourceInfo {
+            group: "apps".into(),
+            plural: "deployments".into(),
+            ..core.clone()
+        };
         assert_eq!(resource_id(&core), "pods");
         assert_eq!(resource_id(&apps), "deployments.apps");
     }

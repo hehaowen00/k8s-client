@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type { ResourceInfo } from "./api";
+import { S } from "./strings";
 
 export function formatAge(ts?: string | null, now = Date.now()): string {
   if (!ts) return "";
@@ -14,7 +15,7 @@ export function formatAge(ts?: string | null, now = Date.now()): string {
   if (h < 24) return `${h}h${m && h < 10 ? `${m}m` : ""}`;
   const d = Math.floor(h / 24);
   if (d < 365) return `${d}d${h % 24 && d < 10 ? `${h % 24}h` : ""}`;
-  return `${Math.floor(d / 365)}y${Math.floor((d % 365))}d`;
+  return `${Math.floor(d / 365)}y${Math.floor(d % 365)}d`;
 }
 
 /**
@@ -67,7 +68,7 @@ export function statusTone(value: string): Tone {
 
 const CATEGORIES: [string, [string, string][]][] = [
   [
-    "Workloads",
+    S.nav.workloads,
     [
       ["", "Pod"],
       ["apps", "Deployment"],
@@ -79,7 +80,7 @@ const CATEGORIES: [string, [string, string][]][] = [
     ],
   ],
   [
-    "Config",
+    S.nav.config,
     [
       ["", "ConfigMap"],
       ["", "Secret"],
@@ -95,7 +96,7 @@ const CATEGORIES: [string, [string, string][]][] = [
     ],
   ],
   [
-    "Network",
+    S.nav.network,
     [
       ["", "Service"],
       ["", "Endpoints"],
@@ -106,7 +107,7 @@ const CATEGORIES: [string, [string, string][]][] = [
     ],
   ],
   [
-    "Storage",
+    S.nav.storage,
     [
       ["", "PersistentVolumeClaim"],
       ["", "PersistentVolume"],
@@ -117,7 +118,7 @@ const CATEGORIES: [string, [string, string][]][] = [
     ],
   ],
   [
-    "Access Control",
+    S.nav.accessControl,
     [
       ["", "ServiceAccount"],
       ["rbac.authorization.k8s.io", "Role"],
@@ -127,7 +128,7 @@ const CATEGORIES: [string, [string, string][]][] = [
     ],
   ],
   [
-    "Cluster",
+    S.nav.cluster,
     [
       ["", "Node"],
       ["", "Namespace"],
@@ -188,7 +189,14 @@ export function buildSections(served: ResourceInfo[], q = ""): Section[] {
   const known = new Set(served.map((r) => `${r.group}/${r.kind}`));
   const placeholders = CATEGORIES.flatMap(([, entries]) => entries)
     .filter(([g, k]) => !known.has(`${g}/${k}`))
-    .map(([group, kind]): ResourceInfo => ({ group, kind, version: "", plural: guessPlural(kind), namespaced: false, verbs: [] }));
+    .map(([group, kind]): ResourceInfo => ({
+      group,
+      kind,
+      version: "",
+      plural: guessPlural(kind),
+      namespaced: false,
+      verbs: [],
+    }));
   const resources = [...served, ...placeholders].filter(
     (r) => !q || r.kind.toLowerCase().includes(q) || r.plural.includes(q) || r.group.includes(q),
   );
@@ -217,7 +225,7 @@ export function buildSections(served: ResourceInfo[], q = ""): Section[] {
       groups.get(r.group)!.push(r);
     }
     sections.push({
-      title: "Custom Resources",
+      title: S.nav.customResources,
       items: custom,
       groups: [...groups.entries()]
         .sort(([a], [b]) => a.localeCompare(b))
@@ -225,7 +233,7 @@ export function buildSections(served: ResourceInfo[], q = ""): Section[] {
     });
   }
   if (other.length) {
-    sections.push({ title: "Other", items: other.sort((a, b) => a.kind.localeCompare(b.kind)) });
+    sections.push({ title: S.nav.other, items: other.sort((a, b) => a.kind.localeCompare(b.kind)) });
   }
   return sections;
 }
@@ -299,8 +307,22 @@ export function parseQuantity(q: string | number | undefined | null): number {
   let n = Number(m[1]);
   if (m[2]) n *= 10 ** Number(m[2]);
   const mult: Record<string, number> = {
-    "": 1, n: 1e-9, u: 1e-6, m: 1e-3, k: 1e3, M: 1e6, G: 1e9, T: 1e12, P: 1e15, E: 1e18,
-    Ki: 1024, Mi: 1024 ** 2, Gi: 1024 ** 3, Ti: 1024 ** 4, Pi: 1024 ** 5, Ei: 1024 ** 6,
+    "": 1,
+    n: 1e-9,
+    u: 1e-6,
+    m: 1e-3,
+    k: 1e3,
+    M: 1e6,
+    G: 1e9,
+    T: 1e12,
+    P: 1e15,
+    E: 1e18,
+    Ki: 1024,
+    Mi: 1024 ** 2,
+    Gi: 1024 ** 3,
+    Ti: 1024 ** 4,
+    Pi: 1024 ** 5,
+    Ei: 1024 ** 6,
   };
   return n * (mult[m[3]] ?? 1);
 }

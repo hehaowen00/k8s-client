@@ -22,7 +22,9 @@ fn import_shell_env() {
         return;
     };
     let out = String::from_utf8_lossy(&out.stdout);
-    let Some((_, env)) = out.split_once("\0__ENV__\0") else { return };
+    let Some((_, env)) = out.split_once("\0__ENV__\0") else {
+        return;
+    };
     for (k, v) in env.split('\0').filter_map(|kv| kv.split_once('=')) {
         if k == "PATH" || std::env::var_os(k).is_none() {
             std::env::set_var(k, v);

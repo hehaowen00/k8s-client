@@ -26,7 +26,9 @@ const sameDeps = (a: unknown[], b: unknown[]) => a.length === b.length && a.ever
  * a change in `refresh` reloads but keeps showing the previous result meanwhile.
  */
 export function useAsync<T>(fn: () => Promise<T>, deps: unknown[], refresh: unknown[] = []) {
-  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean; deps?: unknown[] }>({ loading: true });
+  const [state, setState] = useState<{ data?: T; error?: string; loading: boolean; deps?: unknown[] }>({
+    loading: true,
+  });
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
     let cancelled = false;
@@ -101,7 +103,10 @@ export function useWatchObjects(
   selectors: { labelSelector?: string | null; fieldSelector?: string | null },
   active = true,
 ) {
-  const [state, setState] = useState<{ items: KubeObject[] | null; error: string | null }>({ items: null, error: null });
+  const [state, setState] = useState<{ items: KubeObject[] | null; error: string | null }>({
+    items: null,
+    error: null,
+  });
   const { labelSelector, fieldSelector } = selectors;
   useEffect(() => {
     setState({ items: null, error: null });

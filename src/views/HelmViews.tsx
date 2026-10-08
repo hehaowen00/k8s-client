@@ -14,6 +14,7 @@ import { openContextMenu } from "../components/ContextMenu";
 import { Select } from "../components/Select";
 import { Drawer } from "../components/Drawer";
 import { Checkbox } from "../components/Checkbox";
+import { S } from "../strings";
 
 /** "podinfo-6.14.1" -> ["podinfo", "6.14.1"] */
 export function splitChart(chart: string): [string, string] {
@@ -36,7 +37,17 @@ function Tone({ value }: { value: string }) {
 // Releases
 // ---------------------------------------------------------------------------
 
-export function HelmReleases({ context, namespace, active, onNamespace }: { context: string; namespace: string; active: boolean; onNamespace: (ns: string) => void }) {
+export function HelmReleases({
+  context,
+  namespace,
+  active,
+  onNamespace,
+}: {
+  context: string;
+  namespace: string;
+  active: boolean;
+  onNamespace: (ns: string) => void;
+}) {
   const now = useNow(10000);
   const namespaces = useNamespaces(context);
   const [list, setList] = useState<HelmRelease[] | null>(null);
@@ -80,15 +91,15 @@ export function HelmReleases({ context, namespace, active, onNamespace }: { cont
 
   const uninstall = async (r: HelmRelease) => {
     const ok = await confirmDialog({
-      title: "Uninstall release",
-      message: `Uninstall ${r.name} from ${r.namespace}? All resources it created will be deleted.`,
+      title: S.helm.uninstallTitle,
+      message: S.helm.uninstallMessage(r.name, r.namespace),
       danger: true,
-      confirmLabel: "Uninstall",
+      confirmLabel: S.helm.uninstall,
     });
     if (!ok) return;
     try {
       await api.helmUninstall(context, r.namespace, r.name);
-      toast(`Uninstalled ${r.name}`);
+      toast(S.helm.uninstalled(r.name));
       if (selected?.name === r.name && selected.namespace === r.namespace) setSelected(null);
       reload();
     } catch (e) {
@@ -100,33 +111,40 @@ export function HelmReleases({ context, namespace, active, onNamespace }: { cont
     <>
       <div className="toolbar">
         <h2 className="toolbar-title">
-          Releases <span className="muted small">{list ? shown.length : ""}</span>
+          {S.helm.releasesShort} <span className="muted small">{list ? shown.length : ""}</span>
         </h2>
         <NamespacePicker value={namespace} options={namespaces.data ?? []} onChange={onNamespace} />
-        <input className="input filter" placeholder="Filter releases" value={filter} onChange={(e) => setFilter(e.target.value)} />
+        <input
+          className="input filter"
+          placeholder={S.helm.filterReleases}
+          value={filter}
+          onChange={(e) => setFilter(e.target.value)}
+        />
         <div className="spacer" />
-        <button className="btn btn-sm btn-ghost btn-icon" onClick={reload} title="Refresh">
+        <button className="btn btn-sm btn-ghost btn-icon" onClick={reload} title={S.helm.refresh}>
           ⟳
         </button>
       </div>
       <div className="content-split">
         <div className="helm-list">
           {error && <div className="error-box">{error}</div>}
-          {nsSel.none && <div className="empty">Choose a namespace (or All namespaces) to list Helm releases</div>}
-          {!nsSel.none && !list && !error && <div className="empty">Loading releases…</div>}
-          {!nsSel.none && list && shown.length === 0 && <div className="empty">{list.length ? "No releases match" : "No Helm releases"}</div>}
+          {nsSel.none && <div className="empty">{S.helm.chooseNamespace}</div>}
+          {!nsSel.none && !list && !error && <div className="empty">{S.helm.loadingReleases}</div>}
+          {!nsSel.none && list && shown.length === 0 && (
+            <div className="empty">{list.length ? S.helm.noReleasesMatch : S.helm.noReleases}</div>
+          )}
           {!nsSel.none && shown.length > 0 && (
             <table className="dtable">
               <thead>
                 <tr>
-                  <th>Name</th>
-                  <th>Namespace</th>
-                  <th>Chart</th>
-                  <th>Version</th>
-                  <th>App version</th>
-                  <th>Revision</th>
-                  <th>Status</th>
-                  <th>Updated</th>
+                  <th>{S.field.name}</th>
+                  <th>{S.field.namespace}</th>
+                  <th>{S.field.chart}</th>
+                  <th>{S.field.version}</th>
+                  <th>{S.field.appVersion}</th>
+                  <th>{S.field.revision}</th>
+                  <th>{S.field.status}</th>
+                  <th>{S.field.updated}</th>
                 </tr>
               </thead>
               <tbody>
@@ -140,9 +158,9 @@ export function HelmReleases({ context, namespace, active, onNamespace }: { cont
                       onClick={() => setSelected(isSel ? null : r)}
                       onContextMenu={(e) =>
                         openContextMenu(e, [
-                          { label: "Details", onClick: () => setSelected(r) },
+                          { label: S.helm.details, onClick: () => setSelected(r) },
                           { separator: true, label: "" },
-                          { label: "Uninstall", danger: true, onClick: () => uninstall(r) },
+                          { label: S.helm.uninstall, danger: true, onClick: () => uninstall(r) },
                         ])
                       }
                     >
@@ -220,14 +238,14 @@ function ReleaseDetail({
 
   const rollback = async (revision: number) => {
     const ok = await confirmDialog({
-      title: "Roll back release",
-      message: `Roll ${release.name} back to revision ${revision}?`,
-      confirmLabel: "Roll back",
+      title: S.helm.rollbackTitle,
+      message: S.helm.rollbackMessage(release.name, revision),
+      confirmLabel: S.helm.rollback,
     });
     if (!ok) return;
     try {
       await api.helmRollback(context, release.namespace, release.name, revision);
-      toast(`Rolled back ${release.name} to revision ${revision}`);
+      toast(S.helm.rolledBack(release.name, revision));
       refresh();
     } catch (e) {
       toast(String(e), "bad");
@@ -238,15 +256,15 @@ function ReleaseDetail({
     <div className="detail compact">
       <div className="detail-head">
         <div className="detail-title">
-          <span className="kind-chip">Release</span>
+          <span className="kind-chip">{S.helm.release}</span>
           <span className="detail-name">{release.name}</span>
-          <span className="muted small">in {release.namespace}</span>
+          <span className="muted small">{S.helm.inNamespace(release.namespace)}</span>
         </div>
         <div className="detail-actions">
           <button className="btn btn-sm btn-danger-ghost" onClick={onUninstall}>
-            Uninstall
+            {S.helm.uninstall}
           </button>
-          <button className="btn btn-sm btn-ghost btn-icon" onClick={onClose} title="Close">
+          <button className="btn btn-sm btn-ghost btn-icon" onClick={onClose} title={S.common.close}>
             ✕
           </button>
         </div>
@@ -254,28 +272,36 @@ function ReleaseDetail({
       <div className="subtabs">
         {(["overview", "values", "manifest", "history"] as ReleaseView[]).map((v) => (
           <button key={v} className={`subtab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>
-            {v[0].toUpperCase() + v.slice(1)}
+            {S.helm.releaseViews[v]}
           </button>
         ))}
       </div>
       <div className="detail-body">
         {error && <div className="error-box">{error}</div>}
-        {!details && !error && <div className="empty">Loading…</div>}
-        {details && view === "overview" && <ReleaseOverview context={context} release={release} details={details} now={now} />}
+        {!details && !error && <div className="empty">{S.detail.loading}</div>}
+        {details && view === "overview" && (
+          <ReleaseOverview context={context} release={release} details={details} now={now} />
+        )}
         {details && view === "values" && (
-          <UpgradeEditor context={context} release={release} chartName={chartName} initialValues={details.values} onUpgraded={refresh} />
+          <UpgradeEditor
+            context={context}
+            release={release}
+            chartName={chartName}
+            initialValues={details.values}
+            onUpgraded={refresh}
+          />
         )}
         {details && view === "manifest" && <YamlEditor value={details.manifest} readOnly />}
         {details && view === "history" && (
           <table className="dtable">
             <thead>
               <tr>
-                <th>Revision</th>
-                <th>Status</th>
-                <th>Chart</th>
-                <th>App version</th>
-                <th>Updated</th>
-                <th>Description</th>
+                <th>{S.field.revision}</th>
+                <th>{S.field.status}</th>
+                <th>{S.field.chart}</th>
+                <th>{S.field.appVersion}</th>
+                <th>{S.field.updated}</th>
+                <th>{S.field.description}</th>
                 <th />
               </tr>
             </thead>
@@ -293,7 +319,7 @@ function ReleaseDetail({
                   <td>
                     {String(h.revision) !== release.revision && (
                       <button className="btn btn-xs" onClick={() => rollback(h.revision)}>
-                        Roll back
+                        {S.helm.rollback}
                       </button>
                     )}
                   </td>
@@ -321,7 +347,17 @@ function manifestObjects(manifest: string): { apiVersion: string; kind: string; 
   return out;
 }
 
-function ReleaseOverview({ context, release, details, now }: { context: string; release: HelmRelease; details: HelmReleaseDetails; now: number }) {
+function ReleaseOverview({
+  context,
+  release,
+  details,
+  now,
+}: {
+  context: string;
+  release: HelmRelease;
+  details: HelmReleaseDetails;
+  now: number;
+}) {
   const discovery = useDiscovery(context);
   const openObject = useOpenObject();
   const [chart, version] = splitChart(release.chart);
@@ -329,25 +365,25 @@ function ReleaseOverview({ context, release, details, now }: { context: string; 
   return (
     <div className="overview">
       <section className="dsection">
-        <h4>Release</h4>
+        <h4>{S.helm.release}</h4>
         <dl className="kv">
-          <dt>Status</dt>
+          <dt>{S.field.status}</dt>
           <dd>
             <Tone value={release.status} />
           </dd>
-          <dt>Chart</dt>
+          <dt>{S.field.chart}</dt>
           <dd>
             {chart} {version}
           </dd>
-          <dt>App version</dt>
+          <dt>{S.field.appVersion}</dt>
           <dd>{release.app_version}</dd>
-          <dt>Revision</dt>
+          <dt>{S.field.revision}</dt>
           <dd>{release.revision}</dd>
-          <dt>Updated</dt>
-          <dd>{formatAge(helmTime(release.updated), now)} ago</dd>
+          <dt>{S.field.updated}</dt>
+          <dd>{S.detail.ago(formatAge(helmTime(release.updated), now))}</dd>
           {details.status?.info?.description && (
             <>
-              <dt>Description</dt>
+              <dt>{S.field.description}</dt>
               <dd>{details.status.info.description}</dd>
             </>
           )}
@@ -355,7 +391,7 @@ function ReleaseOverview({ context, release, details, now }: { context: string; 
       </section>
       {objects.length > 0 && (
         <section className="dsection">
-          <h4>Resources ({objects.length})</h4>
+          <h4>{S.helm.resources(objects.length)}</h4>
           <table className="dtable">
             <tbody>
               {objects.map((o, i) => {
@@ -370,7 +406,12 @@ function ReleaseOverview({ context, release, details, now }: { context: string; 
                           className="link"
                           onClick={(e) =>
                             openObject(
-                              { context, resource: res, namespace: res.namespaced ? o.namespace ?? release.namespace : null, name: o.name },
+                              {
+                                context,
+                                resource: res,
+                                namespace: res.namespaced ? (o.namespace ?? release.namespace) : null,
+                                name: o.name,
+                              },
                               inBackground(e),
                             )
                           }
@@ -390,7 +431,7 @@ function ReleaseOverview({ context, release, details, now }: { context: string; 
       )}
       {details.notes.trim() && (
         <section className="dsection">
-          <h4>Notes</h4>
+          <h4>{S.helm.notes}</h4>
           <pre className="data-val">{details.notes}</pre>
         </section>
       )}
@@ -438,15 +479,23 @@ function UpgradeEditor({
 
   const upgrade = async () => {
     const ok = await confirmDialog({
-      title: "Upgrade release",
-      message: `Upgrade ${release.name} to ${source} ${version} with these values?`,
-      confirmLabel: "Upgrade",
+      title: S.helm.upgradeTitle,
+      message: S.helm.upgradeMessage(release.name, `${source} ${version}`),
+      confirmLabel: S.helm.upgrade,
     });
     if (!ok) return;
     setBusy(true);
     try {
-      await api.helmInstall({ context, namespace: release.namespace, name: release.name, chart: source, version, values, upgrade: true });
-      toast(`Upgraded ${release.name}`);
+      await api.helmInstall({
+        context,
+        namespace: release.namespace,
+        name: release.name,
+        chart: source,
+        version,
+        values,
+        upgrade: true,
+      });
+      toast(S.helm.upgraded(release.name));
       onUpgraded();
     } catch (e) {
       toast(String(e), "bad");
@@ -459,32 +508,42 @@ function UpgradeEditor({
     <div className="yaml-view">
       <div className="yaml-toolbar">
         {candidates === null ? (
-          <span className="muted small">Looking up chart in your repositories…</span>
+          <span className="muted small">{S.helm.lookingUp}</span>
         ) : candidates.length === 0 ? (
-          <span className="tone-warn small">Chart "{chartName}" isn't in your Helm repositories — add its repo under Helm → Charts to upgrade.</span>
+          <span className="tone-warn small">{S.helm.notInRepos(chartName)}</span>
         ) : (
           <>
-            <Select className="select" value={source} onChange={(e) => setSource(e.target.value)} title="Chart source">
+            <Select
+              className="select"
+              value={source}
+              onChange={(e) => setSource(e.target.value)}
+              title={S.helm.chartSource}
+            >
               {repos.map((r) => (
                 <option key={r} value={r}>
                   {r}
                 </option>
               ))}
             </Select>
-            <Select className="select" value={version} onChange={(e) => setVersion(e.target.value)} title="Chart version">
+            <Select
+              className="select"
+              value={version}
+              onChange={(e) => setVersion(e.target.value)}
+              title={S.helm.chartVersion}
+            >
               {versions.map((c) => (
                 <option key={c.version} value={c.version}>
                   {c.version}
-                  {c.version === currentVersion ? " (current)" : ""}
+                  {c.version === currentVersion ? S.helm.currentSuffix : ""}
                 </option>
               ))}
             </Select>
             <button className="btn btn-sm btn-primary" disabled={busy || !source} onClick={upgrade}>
-              {busy ? "Upgrading…" : "Upgrade"}
+              {busy ? S.helm.upgrading : S.helm.upgrade}
             </button>
           </>
         )}
-        <span className="muted small">User-supplied values</span>
+        <span className="muted small">{S.helm.userValues}</span>
       </div>
       <YamlEditor value={values} onChange={setValues} onSave={upgrade} />
     </div>
@@ -521,17 +580,22 @@ export function HelmCharts({ context, active }: { context: string; active: boole
     <>
       <div className="toolbar">
         <h2 className="toolbar-title">
-          Charts <span className="muted small">{charts ? shown.length : ""}</span>
+          {S.helm.chartsShort} <span className="muted small">{charts ? shown.length : ""}</span>
         </h2>
         <Select className="select" value={repo} onChange={(e) => setRepo(e.target.value)}>
-          <option value="">All repositories</option>
+          <option value="">{S.helm.allRepos}</option>
           {repoNames.map((r) => (
             <option key={r} value={r}>
               {r}
             </option>
           ))}
         </Select>
-        <input className="input filter" placeholder="Search charts" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <input
+          className="input filter"
+          placeholder={S.helm.searchCharts}
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+        />
         <div className="spacer" />
         <button
           className="btn btn-sm"
@@ -540,7 +604,7 @@ export function HelmCharts({ context, active }: { context: string; active: boole
             setUpdating(true);
             try {
               await api.helmRepoUpdate();
-              toast("Repositories updated");
+              toast(S.helm.reposUpdated);
               setNonce((n) => n + 1);
             } catch (e) {
               toast(String(e), "bad");
@@ -549,30 +613,32 @@ export function HelmCharts({ context, active }: { context: string; active: boole
             }
           }}
         >
-          {updating ? "Updating…" : "Update repos"}
+          {updating ? S.helm.updating : S.helm.updateRepos}
         </button>
         <button className={`btn btn-sm ${showRepos ? "btn-primary" : ""}`} onClick={() => setShowRepos(!showRepos)}>
-          Repositories
+          {S.helm.repositories}
         </button>
       </div>
       {showRepos && <RepoManager onChanged={() => setNonce((n) => n + 1)} />}
       <div className="content-split">
         <div className="helm-list">
           {error && <div className="error-box">{error}</div>}
-          {!charts && !error && <div className="empty">Loading charts…</div>}
+          {!charts && !error && <div className="empty">{S.helm.loadingCharts}</div>}
           {charts && charts.length === 0 && (
             <div className="empty">
-              No charts. Add a repository (e.g. <span className="mono">https://charts.bitnami.com/bitnami</span>) under Repositories.
+              {S.helm.noChartsBefore}
+              <span className="mono">https://charts.bitnami.com/bitnami</span>
+              {S.helm.noChartsAfter}
             </div>
           )}
           {shown.length > 0 && (
             <table className="dtable">
               <thead>
                 <tr>
-                  <th>Chart</th>
-                  <th>Version</th>
-                  <th>App version</th>
-                  <th>Description</th>
+                  <th>{S.field.chart}</th>
+                  <th>{S.field.version}</th>
+                  <th>{S.field.appVersion}</th>
+                  <th>{S.field.description}</th>
                 </tr>
               </thead>
               <tbody>
@@ -617,7 +683,7 @@ function RepoManager({ onChanged }: { onChanged: () => void }) {
     setBusy(true);
     try {
       await api.helmRepoAdd(name.trim(), url.trim());
-      toast(`Added repository ${name.trim()}`);
+      toast(S.helm.repoAdded(name.trim()));
       setName("");
       setUrl("");
       load();
@@ -641,7 +707,14 @@ function RepoManager({ onChanged }: { onChanged: () => void }) {
                 <button
                   className="btn btn-xs btn-danger-ghost"
                   onClick={async () => {
-                    if (!(await confirmDialog({ title: "Remove repository", message: `Remove Helm repository ${r.name}?`, danger: true, confirmLabel: "Remove" })))
+                    if (
+                      !(await confirmDialog({
+                        title: S.helm.removeRepoTitle,
+                        message: S.helm.removeRepoMessage(r.name),
+                        danger: true,
+                        confirmLabel: S.common.remove,
+                      }))
+                    )
                       return;
                     try {
                       await api.helmRepoRemove(r.name);
@@ -652,14 +725,14 @@ function RepoManager({ onChanged }: { onChanged: () => void }) {
                     }
                   }}
                 >
-                  Remove
+                  {S.common.remove}
                 </button>
               </td>
             </tr>
           ))}
           {repos?.length === 0 && (
             <tr>
-              <td className="muted">No repositories</td>
+              <td className="muted">{S.helm.noRepos}</td>
             </tr>
           )}
         </tbody>
@@ -671,10 +744,15 @@ function RepoManager({ onChanged }: { onChanged: () => void }) {
           add();
         }}
       >
-        <input className="input" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} />
-        <input className="input repo-url" placeholder="https://charts.example.com" value={url} onChange={(e) => setUrl(e.target.value)} />
+        <input className="input" placeholder={S.field.name} value={name} onChange={(e) => setName(e.target.value)} />
+        <input
+          className="input repo-url"
+          placeholder="https://charts.example.com"
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+        />
         <button className="btn btn-sm btn-primary" type="submit" disabled={busy || !name.trim() || !url.trim()}>
-          {busy ? "Adding…" : "Add repository"}
+          {busy ? S.addCluster.adding : S.helm.addRepo}
         </button>
       </form>
     </div>
@@ -726,9 +804,17 @@ function ChartDetail({ context, chart, onClose }: { context: string; chart: Helm
     setBusy(true);
     setNotes(null);
     try {
-      const n = await api.helmInstall({ context, namespace: ns, name: release, chart: chart.name, version, values, createNamespace: createNs });
-      toast(`Installed ${release} in ${ns}`);
-      setNotes(n || "Installed.");
+      const n = await api.helmInstall({
+        context,
+        namespace: ns,
+        name: release,
+        chart: chart.name,
+        version,
+        values,
+        createNamespace: createNs,
+      });
+      toast(S.helm.installed(release, ns));
+      setNotes(n || S.helm.installedNote);
     } catch (e) {
       toast(String(e), "bad");
     } finally {
@@ -740,11 +826,16 @@ function ChartDetail({ context, chart, onClose }: { context: string; chart: Helm
     <div className="detail compact">
       <div className="detail-head">
         <div className="detail-title">
-          <span className="kind-chip">Chart</span>
+          <span className="kind-chip">{S.field.chart}</span>
           <span className="detail-name">{chart.name}</span>
         </div>
         <div className="detail-actions">
-          <Select className="select" value={version} onChange={(e) => setVersion(e.target.value)} title="Version">
+          <Select
+            className="select"
+            value={version}
+            onChange={(e) => setVersion(e.target.value)}
+            title={S.field.version}
+          >
             {(versions.length ? versions : [chart]).map((v) => (
               <option key={v.version} value={v.version}>
                 {v.version}
@@ -752,9 +843,9 @@ function ChartDetail({ context, chart, onClose }: { context: string; chart: Helm
             ))}
           </Select>
           <button className="btn btn-sm btn-primary" onClick={() => setView("install")}>
-            Install
+            {S.helm.install}
           </button>
-          <button className="btn btn-sm btn-ghost btn-icon" onClick={onClose} title="Close">
+          <button className="btn btn-sm btn-ghost btn-icon" onClick={onClose} title={S.common.close}>
             ✕
           </button>
         </div>
@@ -762,14 +853,15 @@ function ChartDetail({ context, chart, onClose }: { context: string; chart: Helm
       <div className="subtabs">
         {(["readme", "values", "install"] as ChartView[]).map((v) => (
           <button key={v} className={`subtab ${view === v ? "active" : ""}`} onClick={() => setView(v)}>
-            {v === "readme" ? "README" : v[0].toUpperCase() + v.slice(1)}
+            {S.helm.chartViews[v]}
           </button>
         ))}
       </div>
       <div className="detail-body">
         {error && <div className="error-box">{error}</div>}
-        {!info && !error && <div className="empty">Loading…</div>}
-        {info && view === "readme" &&
+        {!info && !error && <div className="empty">{S.detail.loading}</div>}
+        {info &&
+          view === "readme" &&
           (readmeHtml ? (
             <div
               className="markdown"
@@ -784,37 +876,48 @@ function ChartDetail({ context, chart, onClose }: { context: string; chart: Helm
               }}
             />
           ) : (
-            <div className="empty">No README</div>
+            <div className="empty">{S.helm.noReadme}</div>
           ))}
         {info && view === "values" && <YamlEditor value={info.values} readOnly />}
         {info && view === "install" && (
           <div className="yaml-view">
             <div className="install-form">
               <label className="field">
-                <span>Release name</span>
+                <span>{S.helm.releaseName}</span>
                 <input className="input" value={release} onChange={(e) => setRelease(e.target.value)} />
               </label>
               <label className="field">
-                <span>Namespace</span>
+                <span>{S.field.namespace}</span>
                 <input className="input" list={`ns-${chart.name}`} value={ns} onChange={(e) => setNs(e.target.value)} />
                 <datalist id={`ns-${chart.name}`}>
-                  {namespaces.data?.map((n) => <option key={n} value={n} />)}
+                  {namespaces.data?.map((n) => (
+                    <option key={n} value={n} />
+                  ))}
                 </datalist>
               </label>
-              <Checkbox checked={createNs} onChange={(e) => setCreateNs(e.target.checked)}>Create namespace</Checkbox>
-              <button className="btn btn-sm btn-primary" disabled={busy || !release.trim() || !ns.trim()} onClick={install}>
-                {busy ? "Installing…" : `Install ${version}`}
+              <Checkbox checked={createNs} onChange={(e) => setCreateNs(e.target.checked)}>
+                {S.helm.createNamespace}
+              </Checkbox>
+              <button
+                className="btn btn-sm btn-primary"
+                disabled={busy || !release.trim() || !ns.trim()}
+                onClick={install}
+              >
+                {busy ? S.helm.installing : S.helm.installVersion(version)}
               </button>
             </div>
             {notes !== null && (
               <div className="ok-box">
                 <div>
-                  Installed {release} in {ns}.{" "}
-                  <button className="link" onClick={() => open({ kind: "cluster", context, resource: null, namespace: ns, page: "releases" })}>
-                    View releases
+                  {S.helm.installedIn(release, ns)}{" "}
+                  <button
+                    className="link"
+                    onClick={() => open({ kind: "cluster", context, resource: null, namespace: ns, page: "releases" })}
+                  >
+                    {S.helm.viewReleases}
                   </button>
                 </div>
-                {notes && notes !== "Installed." && <pre className="install-notes">{notes}</pre>}
+                {notes && notes !== S.helm.installedNote && <pre className="install-notes">{notes}</pre>}
               </div>
             )}
             <YamlEditor value={values} onChange={setValues} onSave={install} />

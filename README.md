@@ -76,8 +76,9 @@ than tab switching go to the shell while a terminal is focused (the Windows key 
 | Linux | Installs `kube-portal` to `~/.local/bin` with a desktop entry and icons (`sudo make install PREFIX=/usr/local` for system-wide) |
 | Windows | Builds the NSIS installer and runs it silently (per-user; Start menu entry). Run from Git Bash / MSYS `make` |
 
-`make uninstall` removes it again (settings are kept). `make help` lists all targets (`dev`, `build`, `package`,
-`test`, `prune`, `clean`). macOS builds are ad-hoc signed; pass `SIGN_ID="Developer ID Application: …"` to
+`make uninstall` removes it again (settings are kept). `make help` lists all targets (`run`, `build`, `package`,
+`fmt`, `test`, `prune`, `clean`, and `macos-install` / `linux-install` / `windows-install` to install for a
+specific OS). macOS builds are ad-hoc signed; pass `SIGN_ID="Developer ID Application: …"` to
 sign for distribution.
 
 ## Development
@@ -89,7 +90,8 @@ Helm features need the `helm` CLI on PATH (or a path in Settings).
 pnpm install
 pnpm tauri dev      # run in development
 pnpm tauri build    # produce a release bundle
-make test           # type-check, Rust tests and clippy
+make fmt            # format TypeScript (Prettier) and Rust (rustfmt)
+make test           # type-check, format check, Rust tests and clippy
 ```
 
 ### Where things are stored

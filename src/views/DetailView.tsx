@@ -1,7 +1,18 @@
 import { shortcut } from "../keys";
 import { useEffect, useMemo, useState } from "react";
 import { restartAcrossDialog } from "../components/RestartAcrossDialog";
-import { api, EVENT_RESOURCE, hasWorkloadLogs, isCronJob, isNode, isPod, isRestartable, isScalable, type KubeObject, type ResourceInfo } from "../api";
+import {
+  api,
+  EVENT_RESOURCE,
+  hasWorkloadLogs,
+  isCronJob,
+  isNode,
+  isPod,
+  isRestartable,
+  isScalable,
+  type KubeObject,
+  type ResourceInfo,
+} from "../api";
 import {
   deleteTarget,
   drainTarget,
@@ -14,7 +25,11 @@ import {
   portForwardTarget,
   setCordon,
   setSuspend,
-  triggerCronJob, restartTarget, scaleTarget, type Target } from "../actions";
+  triggerCronJob,
+  restartTarget,
+  scaleTarget,
+  type Target,
+} from "../actions";
 import { useDiscovery, useWatchObjects } from "../hooks";
 import { inBackground, useOpenObject } from "../clusterNav";
 import { openSession, useTabs, type Tab } from "../store";
@@ -26,6 +41,7 @@ import { usePerms, type Perms } from "../permissions";
 import { nodeSpec, podSpec, workloadSpec } from "../metrics";
 import { YamlEditor } from "../components/YamlEditor";
 import { confirmDialog, toast } from "../components/Dialogs";
+import { S } from "../strings";
 
 type View = "overview" | "yaml" | "events";
 
@@ -92,7 +108,7 @@ export function DetailView(props: Props) {
     if (o) setObj(o);
     setGone(!o);
   }, [watched.items]);
-  const error = watched.error ?? (gone && !obj ? `${resource.kind} "${name}" not found` : fetchError);
+  const error = watched.error ?? (gone && !obj ? S.detail.notFound(resource.kind, name) : fetchError);
 
   const changeView = (v: View) => {
     setView(v);
@@ -101,7 +117,7 @@ export function DetailView(props: Props) {
 
   const replicas = obj?.spec?.replicas as number | undefined;
   const perms = usePerms(context, resource, namespace);
-  const deny = (allowed: boolean) => (allowed ? {} : { disabled: true, title: "You don't have permission for this" });
+  const deny = (allowed: boolean) => (allowed ? {} : { disabled: true, title: S.detail.noPermission });
 
   return (
     <div className={`detail ${compact ? "compact" : ""}`}>
@@ -110,73 +126,94 @@ export function DetailView(props: Props) {
           <span className="detail-name" title={`${resource.kind} ${namespace ? `${namespace}/` : ""}${name}`}>
             {name}
           </span>
-          {gone && <span className="badge bad">deleted</span>}
+          {gone && <span className="badge bad">{S.detail.deleted}</span>}
         </div>
         <div className="detail-actions">
           {isPod(resource) && (
             <>
               <button className="btn btn-sm" {...deny(perms.logs)} onClick={() => openLogs(target)}>
-                Logs
+                {S.actions.logs}
               </button>
               <button className="btn btn-sm" {...deny(perms.exec)} onClick={() => openShell(target)}>
-                Shell
+                {S.actions.shell}
               </button>
-              <button className="btn btn-sm" title="Attach to the main process" {...deny(perms.attach)} onClick={() => openAttach(target)}>
-                Attach
+              <button
+                className="btn btn-sm"
+                title={S.detail.attachHint}
+                {...deny(perms.attach)}
+                onClick={() => openAttach(target)}
+              >
+                {S.actions.attach}
               </button>
             </>
           )}
           {isNode(resource) && (
             <>
               <button className="btn btn-sm" onClick={() => openNodeShell(context, name)}>
-                Shell
+                {S.actions.shell}
               </button>
               {obj?.spec?.unschedulable ? (
                 <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => setCordon(target, false)}>
-                  Uncordon
+                  {S.actions.uncordon}
                 </button>
               ) : (
                 <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => setCordon(target, true)}>
-                  Cordon
+                  {S.actions.cordon}
                 </button>
               )}
               <button className="btn btn-sm" {...deny(perms.patch && perms.evict)} onClick={() => drainTarget(target)}>
-                Drain
+                {S.actions.drain}
               </button>
             </>
           )}
           {isCronJob(resource) && (
             <>
               <button className="btn btn-sm" onClick={() => triggerCronJob(target)}>
-                Trigger
+                {S.detail.trigger}
               </button>
-              <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => setSuspend(target, !obj?.spec?.suspend)}>
-                {obj?.spec?.suspend ? "Resume" : "Suspend"}
+              <button
+                className="btn btn-sm"
+                {...deny(perms.patch)}
+                onClick={() => setSuspend(target, !obj?.spec?.suspend)}
+              >
+                {obj?.spec?.suspend ? S.actions.resume : S.actions.suspend}
               </button>
             </>
           )}
           {hasWorkloadLogs(resource) && (
-            <button className="btn btn-sm" title="Logs from all pods" onClick={() => openWorkloadLogs(target, obj ?? undefined)}>
-              Logs
+            <button
+              className="btn btn-sm"
+              title={S.detail.workloadLogsHint}
+              onClick={() => openWorkloadLogs(target, obj ?? undefined)}
+            >
+              {S.actions.logs}
             </button>
           )}
           {isScalable(resource) && (
             <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => scaleTarget(target, replicas)}>
-              Scale
+              {S.actions.scale}
             </button>
           )}
           {isRestartable(resource) && (
             <>
               <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => restartTarget(target)}>
-                Restart
+                {S.actions.restart}
               </button>
-              <button className="btn btn-sm" title="Restart the same object in other clusters" onClick={() => restartAcrossDialog(target)}>
-                Restart Across Clusters
+              <button
+                className="btn btn-sm"
+                title={S.detail.restartAcrossHint}
+                onClick={() => restartAcrossDialog(target)}
+              >
+                {S.restartAcross.title}
               </button>
             </>
           )}
           {compact && (
-            <button className="btn btn-icon btn-sm" title="Open in new tab" onClick={() => openDetail(target, { view })}>
+            <button
+              className="btn btn-icon btn-sm"
+              title={S.common.openInNewTab}
+              onClick={() => openDetail(target, { view })}
+            >
               ⧉
             </button>
           )}
@@ -187,10 +224,10 @@ export function DetailView(props: Props) {
               if ((await deleteTarget(target)) && compact) props.onClose?.();
             }}
           >
-            Delete
+            {S.actions.delete}
           </button>
           {compact && props.onClose && (
-            <button className="btn btn-sm btn-ghost btn-icon" onClick={props.onClose} title="Close">
+            <button className="btn btn-sm btn-ghost btn-icon" onClick={props.onClose} title={S.common.close}>
               ✕
             </button>
           )}
@@ -199,7 +236,7 @@ export function DetailView(props: Props) {
       <div className="subtabs">
         {(["overview", "yaml", "events"] as View[]).map((v) => (
           <button key={v} className={`subtab ${view === v ? "active" : ""}`} onClick={() => changeView(v)}>
-            {v === "yaml" ? "YAML" : v[0].toUpperCase() + v.slice(1)}
+            {S.detail.views[v]}
           </button>
         ))}
       </div>
@@ -210,7 +247,7 @@ export function DetailView(props: Props) {
           ) : error ? (
             <div className="error-box">{error}</div>
           ) : (
-            <div className="empty">Loading…</div>
+            <div className="empty">{S.detail.loading}</div>
           ))}
         {view === "yaml" && <YamlView target={target} perms={perms} />}
         {view === "events" && obj && <EventsView context={context} namespace={namespace} uid={obj.metadata?.uid} />}
@@ -275,7 +312,10 @@ function Annotations({ map, secret }: { map?: Record<string, string>; secret?: b
             <div key={k} className="annotation">
               <span className="ann-key">{k}</span>
               <span className="ann-val">
-                •••••••• <button className="btn btn-xs" onClick={() => setRevealed(true)}>Reveal</button>
+                ••••••••{" "}
+                <button className="btn btn-xs" onClick={() => setRevealed(true)}>
+                  {S.detail.reveal}
+                </button>
               </span>
             </div>
           );
@@ -310,8 +350,8 @@ function containerTotals(spec: KubeObject | undefined, res: "cpu" | "memory") {
 
 function refLines(t: { requests: number; limits: number }) {
   const refs = [];
-  if (t.limits) refs.push({ value: t.limits, label: "limit" });
-  if (t.requests) refs.push({ value: t.requests, label: "request" });
+  if (t.limits) refs.push({ value: t.limits, label: S.detail.limit });
+  if (t.requests) refs.push({ value: t.requests, label: S.detail.request });
   return refs;
 }
 
@@ -336,15 +376,17 @@ function Metrics({ obj, target, active }: { obj: KubeObject; target: Target; act
         context={context}
         spec={nodeSpec(context, name)}
         active={active}
-        cpuRefs={[{ value: parseQuantity(alloc.cpu), label: "allocatable" }]}
-        memoryRefs={[{ value: parseQuantity(alloc.memory), label: "allocatable" }]}
+        cpuRefs={[{ value: parseQuantity(alloc.cpu), label: S.overview.allocatable }]}
+        memoryRefs={[{ value: parseQuantity(alloc.memory), label: S.overview.allocatable }]}
       />
     );
   }
   if (hasWorkloadLogs(resource)) {
     const selector = selectorString(obj.spec?.selector);
     if (!selector) return null;
-    return <MetricsPanel context={context} spec={workloadSpec(context, ns, resource.kind, name, selector)} active={active} />;
+    return (
+      <MetricsPanel context={context} spec={workloadSpec(context, ns, resource.kind, name, selector)} active={active} />
+    );
   }
   return null;
 }
@@ -360,37 +402,43 @@ function Overview({ obj, target, active }: { obj: KubeObject; target: Target; ac
     const group = String(o.apiVersion).includes("/") ? o.apiVersion.split("/")[0] : "";
     const res = discovery.data?.find((r) => r.group === group && r.kind === o.kind);
     // Owners are in the same namespace, or cluster-scoped (e.g. a Node owning a mirror pod).
-    if (res) openObject({ context: target.context, resource: res, namespace: res.namespaced ? target.namespace : null, name: o.name }, background);
-    else toast(`Unknown resource ${o.apiVersion}/${o.kind}`, "bad");
+    if (res)
+      openObject(
+        { context: target.context, resource: res, namespace: res.namespaced ? target.namespace : null, name: o.name },
+        background,
+      );
+    else toast(S.detail.unknownResource(`${o.apiVersion}/${o.kind}`), "bad");
   };
 
   const showMetrics = isPod(target.resource) || isNode(target.resource) || hasWorkloadLogs(target.resource);
   return (
     <div className="overview">
       {showMetrics && (
-        <Section title="Metrics">
+        <Section title={S.field.metrics}>
           <Metrics obj={obj} target={target} active={active} />
         </Section>
       )}
-      <Section title="Metadata">
+      <Section title={S.field.metadata}>
         <dl className="kv">
-          <KV label="Name">{md.name}</KV>
-          <KV label="Namespace">{md.namespace}</KV>
-          <KV label="Created">
+          <KV label={S.field.name}>{md.name}</KV>
+          <KV label={S.field.namespace}>{md.namespace}</KV>
+          <KV label={S.field.created}>
             {md.creationTimestamp && (
               <span title={md.creationTimestamp}>{formatAge(md.creationTimestamp, now)} ago</span>
             )}
           </KV>
-          <KV label="UID">
+          <KV label={S.field.uid}>
             <span className="mono small">{md.uid}</span>
           </KV>
-          <KV label="Labels">
+          <KV label={S.field.labels}>
             {md.labels && Object.keys(md.labels).length ? <Chips map={md.labels} /> : undefined}
           </KV>
-          <KV label="Annotations">
-            {md.annotations && Object.keys(md.annotations).length ? <Annotations map={md.annotations} secret={target.resource.kind === "Secret"} /> : undefined}
+          <KV label={S.field.annotations}>
+            {md.annotations && Object.keys(md.annotations).length ? (
+              <Annotations map={md.annotations} secret={target.resource.kind === "Secret"} />
+            ) : undefined}
           </KV>
-          <KV label="Controlled By">
+          <KV label={S.field.controlledBy}>
             {md.ownerReferences?.length
               ? md.ownerReferences.map((o: KubeObject) => (
                   <button key={o.uid} className="link" onClick={(e) => openOwner(o, inBackground(e))}>
@@ -399,7 +447,7 @@ function Overview({ obj, target, active }: { obj: KubeObject; target: Target; ac
                 ))
               : undefined}
           </KV>
-          <KV label="Finalizers">{md.finalizers?.length ? md.finalizers.join(", ") : undefined}</KV>
+          <KV label={S.field.finalizers}>{md.finalizers?.length ? md.finalizers.join(", ") : undefined}</KV>
         </dl>
       </Section>
 
@@ -407,15 +455,15 @@ function Overview({ obj, target, active }: { obj: KubeObject; target: Target; ac
       <KindExtras obj={obj} target={target} active={active} />
 
       {conditions?.length ? (
-        <Section title="Conditions">
+        <Section title={S.field.conditions}>
           <table className="dtable">
             <thead>
               <tr>
-                <th>Type</th>
-                <th>Status</th>
-                <th>Reason</th>
-                <th>Message</th>
-                <th>Age</th>
+                <th>{S.field.type}</th>
+                <th>{S.field.status}</th>
+                <th>{S.field.reason}</th>
+                <th>{S.field.message}</th>
+                <th>{S.field.age}</th>
               </tr>
             </thead>
             <tbody>
@@ -454,7 +502,10 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
 
   if (isPod(resource)) {
     const statuses = new Map<string, KubeObject>(
-      [...(status.initContainerStatuses ?? []), ...(status.containerStatuses ?? [])].map((s: KubeObject) => [s.name, s]),
+      [...(status.initContainerStatuses ?? []), ...(status.containerStatuses ?? [])].map((s: KubeObject) => [
+        s.name,
+        s,
+      ]),
     );
     const containers: [KubeObject, boolean][] = [
       ...(spec.initContainers ?? []).map((c: KubeObject) => [c, true]),
@@ -462,21 +513,21 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
     ];
     return (
       <>
-        <Section title="Status">
+        <Section title={S.field.status}>
           <dl className="kv">
-            <KV label="Phase">
+            <KV label={S.field.phase}>
               <Tone value={status.phase} />
             </KV>
-            <KV label="Node">{spec.nodeName}</KV>
-            <KV label="Pod IP">{status.podIPs?.map((p: KubeObject) => p.ip).join(", ") || status.podIP}</KV>
-            <KV label="Host IP">{status.hostIP}</KV>
-            <KV label="QoS Class">{status.qosClass}</KV>
-            <KV label="Service Account">{spec.serviceAccountName}</KV>
-            <KV label="Priority Class">{spec.priorityClassName}</KV>
-            <KV label="Message">{status.message}</KV>
+            <KV label={S.field.node}>{spec.nodeName}</KV>
+            <KV label={S.field.podIp}>{status.podIPs?.map((p: KubeObject) => p.ip).join(", ") || status.podIP}</KV>
+            <KV label={S.field.hostIp}>{status.hostIP}</KV>
+            <KV label={S.field.qosClass}>{status.qosClass}</KV>
+            <KV label={S.field.serviceAccount}>{spec.serviceAccountName}</KV>
+            <KV label={S.field.priorityClass}>{spec.priorityClassName}</KV>
+            <KV label={S.field.message}>{status.message}</KV>
           </dl>
         </Section>
-        <Section title="Containers">
+        <Section title={S.field.containers}>
           <div className="containers">
             {containers.map(([c, init]) => {
               const s = statuses.get(c.name);
@@ -486,29 +537,29 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
                   <div className="container-head">
                     <span className={`dot tone-bg-${statusTone(state) ?? "muted"}`} />
                     <strong>{c.name}</strong>
-                    {init && <span className="badge">init</span>}
+                    {init && <span className="badge">{S.detail.init}</span>}
                     <span className="spacer" />
                     <button className="btn btn-xs" onClick={() => openLogsFor(target, c.name)}>
-                      Logs
+                      {S.actions.logs}
                     </button>
                     {!init && (
                       <button className="btn btn-xs" onClick={() => openShellFor(target, c.name)}>
-                        Shell
+                        {S.actions.shell}
                       </button>
                     )}
                   </div>
                   <dl className="kv small">
-                    <KV label="Image">
+                    <KV label={S.field.image}>
                       <span className="mono">{c.image}</span>
                     </KV>
-                    <KV label="State">
+                    <KV label={S.field.state}>
                       <Tone value={state} />
                       {s?.state?.waiting?.message && <div className="muted wrap">{s.state.waiting.message}</div>}
                     </KV>
-                    <KV label="Ready">{s ? String(s.ready) : undefined}</KV>
-                    <KV label="Restarts">{s?.restartCount ? String(s.restartCount) : undefined}</KV>
-                    <KV label="Last State">{containerState(s?.lastState) || undefined}</KV>
-                    <KV label="Ports">
+                    <KV label={S.field.ready}>{s ? String(s.ready) : undefined}</KV>
+                    <KV label={S.field.restarts}>{s?.restartCount ? String(s.restartCount) : undefined}</KV>
+                    <KV label={S.field.lastState}>{containerState(s?.lastState) || undefined}</KV>
+                    <KV label={S.field.ports}>
                       {c.ports?.length ? (
                         <div className="port-list">
                           {c.ports.map((p: KubeObject) => (
@@ -516,8 +567,11 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
                               {p.name ? `${p.name}: ` : ""}
                               {p.containerPort}/{p.protocol ?? "TCP"}
                               {!init && (
-                                <button className="btn btn-xs" onClick={() => portForwardTarget(target, obj, p.containerPort)}>
-                                  Forward
+                                <button
+                                  className="btn btn-xs"
+                                  onClick={() => portForwardTarget(target, obj, p.containerPort)}
+                                >
+                                  {S.detail.forward}
                                 </button>
                               )}
                             </span>
@@ -525,17 +579,21 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
                         </div>
                       ) : undefined}
                     </KV>
-                    <KV label="Requests">
+                    <KV label={S.field.requests}>
                       {c.resources?.requests
-                        ? Object.entries(c.resources.requests).map(([k, v]) => `${k}: ${v}`).join(", ")
+                        ? Object.entries(c.resources.requests)
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(", ")
                         : undefined}
                     </KV>
-                    <KV label="Limits">
+                    <KV label={S.field.limits}>
                       {c.resources?.limits
-                        ? Object.entries(c.resources.limits).map(([k, v]) => `${k}: ${v}`).join(", ")
+                        ? Object.entries(c.resources.limits)
+                            .map(([k, v]) => `${k}: ${v}`)
+                            .join(", ")
                         : undefined}
                     </KV>
-                    <KV label="Command">
+                    <KV label={S.field.command}>
                       {c.command || c.args ? (
                         <span className="mono">{[...(c.command ?? []), ...(c.args ?? [])].join(" ")}</span>
                       ) : undefined}
@@ -553,26 +611,31 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
   if (resource.group === "apps" || (resource.group === "batch" && resource.kind === "Job")) {
     const tmpl = spec.template?.spec ?? spec.jobTemplate?.spec?.template?.spec;
     return (
-      <Section title="Spec">
+      <Section title={S.field.spec}>
         <dl className="kv">
-          <KV label="Replicas">
+          <KV label={S.field.replicas}>
             {spec.replicas !== undefined
-              ? `${status.readyReplicas ?? 0} ready / ${status.updatedReplicas ?? 0} updated / ${status.availableReplicas ?? 0} available / ${spec.replicas} desired`
+              ? S.detail.replicaSummary(
+                  status.readyReplicas ?? 0,
+                  status.updatedReplicas ?? 0,
+                  status.availableReplicas ?? 0,
+                  spec.replicas,
+                )
               : undefined}
           </KV>
-          <KV label="Scheduled">
+          <KV label={S.field.scheduled}>
             {resource.kind === "DaemonSet"
-              ? `${status.numberReady ?? 0} ready / ${status.desiredNumberScheduled ?? 0} desired`
+              ? S.detail.scheduledSummary(status.numberReady ?? 0, status.desiredNumberScheduled ?? 0)
               : undefined}
           </KV>
-          <KV label="Completions">
+          <KV label={S.field.completions}>
             {resource.kind === "Job" ? `${status.succeeded ?? 0} / ${spec.completions ?? 1}` : undefined}
           </KV>
-          <KV label="Strategy">{spec.strategy?.type ?? spec.updateStrategy?.type}</KV>
-          <KV label="Selector">
+          <KV label={S.field.strategy}>{spec.strategy?.type ?? spec.updateStrategy?.type}</KV>
+          <KV label={S.field.selector}>
             {spec.selector?.matchLabels ? <Chips map={spec.selector.matchLabels} /> : undefined}
           </KV>
-          <KV label="Images">
+          <KV label={S.field.images}>
             {tmpl?.containers?.map((c: KubeObject) => (
               <div key={c.name} className="mono small">
                 {c.name}: {c.image}
@@ -586,29 +649,29 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
 
   if (resource.group === "" && resource.kind === "Service") {
     return (
-      <Section title="Spec">
+      <Section title={S.field.spec}>
         <dl className="kv">
-          <KV label="Type">{spec.type}</KV>
-          <KV label="Cluster IP">{spec.clusterIPs?.join(", ") ?? spec.clusterIP}</KV>
-          <KV label="External">
+          <KV label={S.field.type}>{spec.type}</KV>
+          <KV label={S.field.clusterIp}>{spec.clusterIPs?.join(", ") ?? spec.clusterIP}</KV>
+          <KV label={S.field.external}>
             {status.loadBalancer?.ingress?.map((i: KubeObject) => i.ip ?? i.hostname).join(", ") ||
               spec.externalIPs?.join(", ") ||
               spec.externalName}
           </KV>
-          <KV label="Ports">
+          <KV label={S.field.ports}>
             {spec.ports?.map((p: KubeObject) => (
               <div key={`${p.port}/${p.protocol}`} className="mono small port-item">
                 {p.name ? `${p.name}: ` : ""}
                 {p.port}
                 {p.nodePort ? `:${p.nodePort}` : ""} → {p.targetPort}/{p.protocol ?? "TCP"}
                 <button className="btn btn-xs" onClick={() => portForwardTarget(target, obj, p.port)}>
-                  Forward
+                  {S.detail.forward}
                 </button>
               </div>
             ))}
           </KV>
-          <KV label="Selector">{spec.selector ? <Chips map={spec.selector} /> : undefined}</KV>
-          <KV label="Session Affinity">{spec.sessionAffinity}</KV>
+          <KV label={S.field.selector}>{spec.selector ? <Chips map={spec.selector} /> : undefined}</KV>
+          <KV label={S.field.sessionAffinity}>{spec.sessionAffinity}</KV>
         </dl>
       </Section>
     );
@@ -616,24 +679,26 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
 
   if (resource.group === "" && (resource.kind === "ConfigMap" || resource.kind === "Secret")) {
     const secret = resource.kind === "Secret";
-    const data: Record<string, string> = { ...(obj.data ?? {}), ...(secret ? {} : obj.binaryData ?? {}) };
+    const data: Record<string, string> = { ...(obj.data ?? {}), ...(secret ? {} : (obj.binaryData ?? {})) };
     return (
-      <Section title={`Data${secret && obj.type ? ` (${obj.type})` : ""}`}>
-        {Object.keys(data).length === 0 && <div className="muted">No data</div>}
+      <Section title={S.detail.data(secret ? obj.type : null)}>
+        {Object.keys(data).length === 0 && <div className="muted">{S.common.noData}</div>}
         {Object.entries(data).map(([k, v]) => (
           <div key={k} className="data-entry">
             <div className="data-key">
               <strong>{k}</strong>
               {secret && (
                 <button className="btn btn-xs" onClick={() => setReveal({ ...reveal, [k]: !reveal[k] })}>
-                  {reveal[k] ? "Hide" : "Reveal"}
+                  {reveal[k] ? S.settings.hide : S.detail.reveal}
                 </button>
               )}
               <button
                 className="btn btn-xs btn-ghost"
-                onClick={() => navigator.clipboard.writeText(secret ? decodeBase64(v) : v).then(() => toast("Copied"))}
+                onClick={() =>
+                  navigator.clipboard.writeText(secret ? decodeBase64(v) : v).then(() => toast(S.common.copied))
+                }
               >
-                Copy
+                {S.common.copy}
               </button>
             </div>
             <pre className="data-val">{secret ? (reveal[k] ? decodeBase64(v) : "••••••••") : v}</pre>
@@ -647,29 +712,31 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
     const info = status.nodeInfo ?? {};
     return (
       <>
-        <Section title="System">
+        <Section title={S.field.system}>
           <dl className="kv">
-            <KV label="Addresses">
+            <KV label={S.field.addresses}>
               {status.addresses?.map((a: KubeObject) => `${a.type}: ${a.address}`).join(", ")}
             </KV>
-            <KV label="OS">{info.osImage && `${info.osImage} (${info.operatingSystem}/${info.architecture})`}</KV>
-            <KV label="Kernel">{info.kernelVersion}</KV>
-            <KV label="Kubelet">{info.kubeletVersion}</KV>
-            <KV label="Runtime">{info.containerRuntimeVersion}</KV>
-            <KV label="Pod CIDR">{spec.podCIDR}</KV>
-            <KV label="Unschedulable">{spec.unschedulable ? "true" : undefined}</KV>
-            <KV label="Taints">
+            <KV label={S.field.os}>
+              {info.osImage && `${info.osImage} (${info.operatingSystem}/${info.architecture})`}
+            </KV>
+            <KV label={S.field.kernel}>{info.kernelVersion}</KV>
+            <KV label={S.field.kubelet}>{info.kubeletVersion}</KV>
+            <KV label={S.field.runtime}>{info.containerRuntimeVersion}</KV>
+            <KV label={S.field.podCidr}>{spec.podCIDR}</KV>
+            <KV label={S.field.unschedulable}>{spec.unschedulable ? "true" : undefined}</KV>
+            <KV label={S.field.taints}>
               {spec.taints?.map((t: KubeObject) => `${t.key}${t.value ? "=" + t.value : ""}:${t.effect}`).join(", ")}
             </KV>
           </dl>
         </Section>
-        <Section title="Capacity">
+        <Section title={S.field.capacity}>
           <table className="dtable">
             <thead>
               <tr>
-                <th>Resource</th>
-                <th>Capacity</th>
-                <th>Allocatable</th>
+                <th>{S.field.resource}</th>
+                <th>{S.field.capacity}</th>
+                <th>{S.field.allocatable}</th>
               </tr>
             </thead>
             <tbody>
@@ -726,7 +793,7 @@ function YamlView({ target, perms }: { target: Target; perms: Perms }) {
       const y = await api.replaceYaml(target, text, original);
       setOriginal(y);
       setText(y);
-      toast(`Saved ${target.resource.kind.toLowerCase()}/${target.name}`);
+      toast(S.detail.saved(`${target.resource.kind.toLowerCase()}/${target.name}`));
     } catch (e) {
       setError(String(e));
     } finally {
@@ -737,30 +804,35 @@ function YamlView({ target, perms }: { target: Target; perms: Perms }) {
   return (
     <div className="yaml-view">
       <div className="yaml-toolbar">
-        {!perms.update && <span className="tone-warn small">Read-only: you can't update this object</span>}
+        {!perms.update && <span className="tone-warn small">{S.detail.readOnly}</span>}
         <button className="btn btn-sm btn-primary" disabled={!dirty || saving || !perms.update} onClick={save}>
-          {saving ? "Saving…" : "Save"}
+          {saving ? S.detail.saving : S.logs.save}
         </button>
         <button className="btn btn-sm" disabled={!dirty} onClick={() => original !== null && setText(original)}>
-          Revert
+          {S.detail.revert}
         </button>
         <button
           className="btn btn-sm btn-ghost"
           onClick={async () => {
             if (
               !dirty ||
-              (await confirmDialog({ title: "Reload YAML", message: "Discard your changes and reload?", danger: true, confirmLabel: "Discard" }))
+              (await confirmDialog({
+                title: S.detail.reloadTitle,
+                message: S.detail.reloadMessage,
+                danger: true,
+                confirmLabel: S.detail.discard,
+              }))
             )
               load();
           }}
         >
-          Reload
+          {S.common.reload}
         </button>
-        {dirty && <span className="muted small">Unsaved changes · {shortcut("S")} to save</span>}
+        {dirty && <span className="muted small">{S.detail.unsaved(shortcut("S"))}</span>}
       </div>
       {error && <div className="error-box">{error}</div>}
       {original === null && !error ? (
-        <div className="empty">Loading…</div>
+        <div className="empty">{S.detail.loading}</div>
       ) : (
         <YamlEditor value={text} onChange={setText} onSave={() => dirty && save()} />
       )}
@@ -768,11 +840,14 @@ function YamlView({ target, perms }: { target: Target; perms: Perms }) {
   );
 }
 
-const eventTime = (e: KubeObject): string | undefined => e.lastTimestamp ?? e.eventTime ?? e.metadata?.creationTimestamp;
+const eventTime = (e: KubeObject): string | undefined =>
+  e.lastTimestamp ?? e.eventTime ?? e.metadata?.creationTimestamp;
 
 function EventsView({ context, namespace, uid }: { context: string; namespace: string | null; uid?: string }) {
   const now = useNow(5000);
-  const { items, error } = useWatchObjects(context, uid ? EVENT_RESOURCE : null, namespace, { fieldSelector: `involvedObject.uid=${uid}` });
+  const { items, error } = useWatchObjects(context, uid ? EVENT_RESOURCE : null, namespace, {
+    fieldSelector: `involvedObject.uid=${uid}`,
+  });
   const loading = items === null;
   const data = useMemo(
     () =>
@@ -790,18 +865,18 @@ function EventsView({ context, namespace, uid }: { context: string; namespace: s
   );
 
   if (error && !data) return <div className="error-box">{error}</div>;
-  if (loading && !data) return <div className="empty">Loading…</div>;
-  if (!data?.length) return <div className="empty">No events</div>;
+  if (loading && !data) return <div className="empty">{S.detail.loading}</div>;
+  if (!data?.length) return <div className="empty">{S.detail.noEvents}</div>;
   return (
     <table className="dtable events">
       <thead>
         <tr>
-          <th>Type</th>
-          <th>Reason</th>
-          <th>Message</th>
-          <th>Count</th>
-          <th>Source</th>
-          <th>Last Seen</th>
+          <th>{S.field.type}</th>
+          <th>{S.field.reason}</th>
+          <th>{S.field.message}</th>
+          <th>{S.field.count}</th>
+          <th>{S.field.source}</th>
+          <th>{S.field.lastSeen}</th>
         </tr>
       </thead>
       <tbody>

@@ -18,6 +18,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::kube_ops::urlencode;
 use crate::state::{AppState, Result};
+use crate::strings;
 use crate::watch::{list_watch, Event};
 
 const RECONCILE_EVERY: Duration = Duration::from_secs(3);
@@ -78,7 +79,10 @@ fn containers_of(pod: &Pod, only: Option<&str>) -> Vec<(String, ContainerState)>
         .into_iter()
         .filter(|n| only.is_none_or(|o| o == n))
         .map(|name| {
-            let st = statuses.iter().find(|s| s.name == name).and_then(|s| s.state.as_ref());
+            let st = statuses
+                .iter()
+                .find(|s| s.name == name)
+                .and_then(|s| s.state.as_ref());
             let state = match st {
                 Some(s) if s.running.is_some() => ContainerState::Running,
                 Some(s) if s.terminated.is_some() => ContainerState::Terminated,
@@ -104,14 +108,20 @@ pub async fn stream_multi_logs(
     channel: Channel<MultiLogEvent>,
 ) -> Result<String> {
     if selector.is_none() && pod.is_none() {
-        return Err("either a selector or a pod is required".into());
+        return Err(strings::LOGS_SELECTOR_OR_POD_REQUIRED.into());
     }
     let client = state.client(&context).await?;
     let (id, token) = state.register_stream();
     let api: Api<Pod> = Api::namespaced(client.clone(), &namespace);
     let url = match (&selector, &pod) {
-        (Some(sel), _) => format!("/api/v1/namespaces/{namespace}/pods?labelSelector={}&", urlencode(sel)),
-        (None, Some(name)) => format!("/api/v1/namespaces/{namespace}/pods?fieldSelector={}&", urlencode(&format!("metadata.name={name}"))),
+        (Some(sel), _) => format!(
+            "/api/v1/namespaces/{namespace}/pods?labelSelector={}&",
+            urlencode(sel)
+        ),
+        (None, Some(name)) => format!(
+            "/api/v1/namespaces/{namespace}/pods?fieldSelector={}&",
+            urlencode(&format!("metadata.name={name}"))
+        ),
         (None, None) => unreachable!(),
     };
     let timestamps = timestamps.unwrap_or(false);
@@ -134,7 +144,12 @@ pub async fn stream_multi_logs(
         let mut dirty = false;
         let (wtx, mut wrx) = mpsc::unbounded_channel::<Event>();
         let wtoken = token.clone();
-        tokio::spawn(async move { list_watch(&client, &url, "application/json", true, &wtoken, |e| wtx.send(e).is_ok()).await });
+        tokio::spawn(async move {
+            list_watch(&client, &url, "application/json", true, &wtoken, |e| {
+                wtx.send(e).is_ok()
+            })
+            .await
+        });
 
         'main: loop {
             tokio::select! {
@@ -265,7 +280,13 @@ pub async fn stream_multi_logs(
     Ok(id)
 }
 
-fn spawn_stream(api: Api<Pod>, key: Key, lp: LogParams, tx: mpsc::UnboundedSender<Msg>, token: CancellationToken) {
+fn spawn_stream(
+    api: Api<Pod>,
+    key: Key,
+    lp: LogParams,
+    tx: mpsc::UnboundedSender<Msg>,
+    token: CancellationToken,
+) {
     tokio::spawn(async move {
         let reader = tokio::select! {
             _ = token.cancelled() => return,

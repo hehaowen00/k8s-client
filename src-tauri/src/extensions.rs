@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use tauri::State;
 
 use crate::state::{err, AppState, Result};
+use crate::strings;
 
 const MAX_SOURCE_BYTES: u64 = 5 * 1024 * 1024;
 
@@ -44,7 +45,10 @@ pub fn list_extensions(state: State<'_, AppState>) -> Result<Vec<ExtensionInfo>>
     std::fs::create_dir_all(&dir).map_err(err)?;
     let disabled = state.settings.lock().unwrap().disabled_extensions.clone();
     let mut out = Vec::new();
-    let mut entries: Vec<_> = std::fs::read_dir(&dir).map_err(err)?.filter_map(|e| e.ok()).collect();
+    let mut entries: Vec<_> = std::fs::read_dir(&dir)
+        .map_err(err)?
+        .filter_map(|e| e.ok())
+        .collect();
     entries.sort_by_key(|e| e.file_name());
     for e in entries {
         let path = e.path();
@@ -73,7 +77,9 @@ pub fn list_extensions(state: State<'_, AppState>) -> Result<Vec<ExtensionInfo>>
             Ok(p) if p.starts_with(path.canonicalize().unwrap_or(path.clone())) => {
                 if enabled {
                     match std::fs::metadata(&p) {
-                        Ok(m) if m.len() > MAX_SOURCE_BYTES => info.error = Some("module is larger than 5 MB".into()),
+                        Ok(m) if m.len() > MAX_SOURCE_BYTES => {
+                            info.error = Some(strings::EXT_MODULE_TOO_LARGE.into())
+                        }
                         Ok(_) => match std::fs::read_to_string(&p) {
                             Ok(src) => info.source = Some(src),
                             Err(e) => info.error = Some(e.to_string()),
@@ -82,8 +88,8 @@ pub fn list_extensions(state: State<'_, AppState>) -> Result<Vec<ExtensionInfo>>
                     }
                 }
             }
-            Ok(_) => info.error = Some(format!("{main} is outside the extension folder")),
-            Err(_) => info.error = Some(format!("{main} not found")),
+            Ok(_) => info.error = Some(strings::ext_outside_folder(main)),
+            Err(_) => info.error = Some(strings::ext_not_found(main)),
         }
         out.push(info);
     }

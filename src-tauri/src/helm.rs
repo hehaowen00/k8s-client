@@ -12,6 +12,7 @@ use tauri::{AppHandle, Manager, State};
 use tokio::process::Command;
 
 use crate::state::{err, AppState, Result};
+use crate::strings;
 
 struct Helm {
     kubeconfig: Option<PathBuf>,
@@ -37,13 +38,22 @@ impl Helm {
             // Older name.
             .or_else(|| std::env::var("KUBETAB_HELM").ok())
             .unwrap_or_else(|| "helm".into());
-        let proxy = context.and_then(|c| state.cluster_settings(c).proxy_url).filter(|p| !p.trim().is_empty());
-        Ok(Helm { kubeconfig, binary, proxy })
+        let proxy = context
+            .and_then(|c| state.cluster_settings(c).proxy_url)
+            .filter(|p| !p.trim().is_empty());
+        Ok(Helm {
+            kubeconfig,
+            binary,
+            proxy,
+        })
     }
 
     async fn run(&self, args: &[&str]) -> Result<String> {
         let mut cmd = Command::new(&self.binary);
-        cmd.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
         if let Some(k) = &self.kubeconfig {
             cmd.env("KUBECONFIG", k);
         }
@@ -52,14 +62,18 @@ impl Helm {
         }
         let out = cmd.output().await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                "helm not found — install Helm (https://helm.sh) or set its path in Settings".to_string()
+                strings::HELM_NOT_FOUND.to_string()
             } else {
                 e.to_string()
             }
         })?;
         if !out.status.success() {
             let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            return Err(if stderr.is_empty() { format!("helm {} failed", args.first().unwrap_or(&"")) } else { stderr });
+            return Err(if stderr.is_empty() {
+                strings::helm_failed(args.first().unwrap_or(&""))
+            } else {
+                stderr
+            });
         }
         Ok(String::from_utf8_lossy(&out.stdout).to_string())
     }
@@ -69,7 +83,7 @@ impl Helm {
         if text.trim().is_empty() {
             return Ok(Value::Array(vec![]));
         }
-        serde_json::from_str(&text).map_err(|e| format!("unexpected helm output: {e}"))
+        serde_json::from_str(&text).map_err(strings::helm_unexpected_output)
     }
 }
 
@@ -89,7 +103,9 @@ impl TempValues {
             opts.mode(0o600);
         }
         use std::io::Write;
-        opts.open(&path).and_then(|mut f| f.write_all(yaml.as_bytes())).map_err(err)?;
+        opts.open(&path)
+            .and_then(|mut f| f.write_all(yaml.as_bytes()))
+            .map_err(err)?;
         Ok(TempValues(path))
     }
     fn arg(&self) -> String {
@@ -108,7 +124,12 @@ impl Drop for TempValues {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub async fn helm_list(app: AppHandle, state: State<'_, AppState>, context: String, namespace: Option<String>) -> Result<Value> {
+pub async fn helm_list(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    context: String,
+    namespace: Option<String>,
+) -> Result<Value> {
     let ns = namespace.filter(|n| !n.is_empty());
     let ns_key = ns.clone().unwrap_or_default();
     // `helm list` reads every release secret in full; skip it while their metadata is unchanged.
@@ -118,7 +139,17 @@ pub async fn helm_list(app: AppHandle, state: State<'_, AppState>, context: Stri
     }
     let helm = Helm::for_context(&app, &state, Some(&context)).await?;
     // Explicit states instead of `--all` (removed in Helm 4); works on Helm 3 and 4.
-    let mut args = vec!["list", "--deployed", "--failed", "--pending", "--uninstalling", "-o", "json", "--max", "5000"];
+    let mut args = vec![
+        "list",
+        "--deployed",
+        "--failed",
+        "--pending",
+        "--uninstalling",
+        "-o",
+        "json",
+        "--max",
+        "5000",
+    ];
     match &ns {
         Some(n) => args.extend(["-n", n.as_str()]),
         None => args.push("-A"),
@@ -132,21 +163,34 @@ pub async fn helm_list(app: AppHandle, state: State<'_, AppState>, context: Stri
 
 /// Hash of the Helm release secrets' resourceVersions (metadata only, from the watch cache).
 /// None when there's nothing to go on, e.g. no access or the ConfigMap storage driver.
-async fn release_fingerprint(state: &AppState, context: &str, namespace: Option<&str>) -> Option<u64> {
+async fn release_fingerprint(
+    state: &AppState,
+    context: &str,
+    namespace: Option<&str>,
+) -> Option<u64> {
     use std::hash::{Hash, Hasher};
     let client = state.client(context).await.ok()?;
     let api: Api<Secret> = match namespace {
         Some(n) => Api::namespaced(client, n),
         None => Api::all(client),
     };
-    let list = api.list_metadata(&ListParams::default().match_any().labels("owner=helm")).await.ok()?;
+    let list = api
+        .list_metadata(&ListParams::default().match_any().labels("owner=helm"))
+        .await
+        .ok()?;
     if list.items.is_empty() {
         return None;
     }
     let mut versions: Vec<(Option<String>, Option<String>, Option<String>)> = list
         .items
         .into_iter()
-        .map(|s| (s.metadata.namespace, s.metadata.name, s.metadata.resource_version))
+        .map(|s| {
+            (
+                s.metadata.namespace,
+                s.metadata.name,
+                s.metadata.resource_version,
+            )
+        })
         .collect();
     versions.sort();
     let mut h = std::collections::hash_map::DefaultHasher::new();
@@ -217,7 +261,11 @@ pub struct InstallRequest {
 }
 
 #[tauri::command]
-pub async fn helm_install(app: AppHandle, state: State<'_, AppState>, req: InstallRequest) -> Result<String> {
+pub async fn helm_install(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    req: InstallRequest,
+) -> Result<String> {
     let helm = Helm::for_context(&app, &state, Some(&req.context)).await?;
     let values = TempValues::new(&app, &req.values)?;
     let values_arg = values.arg();
@@ -254,12 +302,19 @@ pub async fn helm_rollback(
 ) -> Result<()> {
     let helm = Helm::for_context(&app, &state, Some(&context)).await?;
     let rev = revision.to_string();
-    helm.run(&["rollback", &name, &rev, "-n", &namespace]).await?;
+    helm.run(&["rollback", &name, &rev, "-n", &namespace])
+        .await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn helm_uninstall(app: AppHandle, state: State<'_, AppState>, context: String, namespace: String, name: String) -> Result<()> {
+pub async fn helm_uninstall(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    context: String,
+    namespace: String,
+    name: String,
+) -> Result<()> {
     let helm = Helm::for_context(&app, &state, Some(&context)).await?;
     helm.run(&["uninstall", &name, "-n", &namespace]).await?;
     Ok(())
@@ -281,14 +336,24 @@ pub async fn helm_repos(app: AppHandle, state: State<'_, AppState>) -> Result<Va
 }
 
 #[tauri::command]
-pub async fn helm_repo_add(app: AppHandle, state: State<'_, AppState>, name: String, url: String) -> Result<()> {
+pub async fn helm_repo_add(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+    url: String,
+) -> Result<()> {
     let helm = Helm::for_context(&app, &state, None).await?;
-    helm.run(&["repo", "add", &name, &url, "--force-update"]).await?;
+    helm.run(&["repo", "add", &name, &url, "--force-update"])
+        .await?;
     Ok(())
 }
 
 #[tauri::command]
-pub async fn helm_repo_remove(app: AppHandle, state: State<'_, AppState>, name: String) -> Result<()> {
+pub async fn helm_repo_remove(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    name: String,
+) -> Result<()> {
     let helm = Helm::for_context(&app, &state, None).await?;
     helm.run(&["repo", "remove", &name]).await?;
     Ok(())
@@ -333,7 +398,12 @@ pub struct ChartInfo {
 }
 
 #[tauri::command]
-pub async fn helm_chart_info(app: AppHandle, state: State<'_, AppState>, chart: String, version: Option<String>) -> Result<ChartInfo> {
+pub async fn helm_chart_info(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    chart: String,
+    version: Option<String>,
+) -> Result<ChartInfo> {
     let helm = Helm::for_context(&app, &state, None).await?;
     let mut base: Vec<&str> = vec![];
     if let Some(v) = version.as_deref().filter(|v| !v.is_empty()) {
@@ -345,7 +415,8 @@ pub async fn helm_chart_info(app: AppHandle, state: State<'_, AppState>, chart: 
         a
     };
     let (a_values, a_readme, a_chart) = (with("values"), with("readme"), with("chart"));
-    let (values, readme, meta) = tokio::join!(helm.run(&a_values), helm.run(&a_readme), helm.run(&a_chart));
+    let (values, readme, meta) =
+        tokio::join!(helm.run(&a_values), helm.run(&a_readme), helm.run(&a_chart));
     Ok(ChartInfo {
         values: values?,
         readme: readme.unwrap_or_default(),

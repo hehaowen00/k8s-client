@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 use crate::state::{err, AppState, Result};
+use crate::strings;
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
@@ -104,7 +105,7 @@ pub fn config_dir() -> Result<PathBuf> {
         .filter(|v| !v.is_empty())
         .map(PathBuf::from)
         .or_else(|| dirs::home_dir().map(|h| h.join(".config")))
-        .ok_or("no home directory")?;
+        .ok_or(strings::NO_HOME_DIR)?;
     Ok(base.join("kube-portal"))
 }
 
@@ -126,13 +127,21 @@ fn open_db() -> Result<rusqlite::Connection> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(false).mode(0o600).open(&path);
+        let _ = std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .mode(0o600)
+            .open(&path);
         restrict(&dir, 0o700);
         restrict(&path, 0o600);
     }
     let db = rusqlite::Connection::open(&path).map_err(err)?;
-    db.execute("CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)", [])
-        .map_err(err)?;
+    db.execute(
+        "CREATE TABLE IF NOT EXISTS kv (key TEXT PRIMARY KEY, value TEXT NOT NULL)",
+        [],
+    )
+    .map_err(err)?;
     Ok(db)
 }
 
@@ -143,7 +152,9 @@ pub fn managed_dir() -> Result<PathBuf> {
 
 /// One-time move from the old per-OS app config dir (settings.json, kubeconfigs/, extensions/).
 pub fn migrate_legacy(app: &AppHandle) {
-    let (Ok(old), Ok(new)) = (app.path().app_config_dir(), config_dir()) else { return };
+    let (Ok(old), Ok(new)) = (app.path().app_config_dir(), config_dir()) else {
+        return;
+    };
     let _ = std::fs::create_dir_all(&new);
     for name in ["kubeconfigs", "extensions"] {
         if old.join(name).is_dir() && !new.join(name).exists() {
@@ -151,9 +162,13 @@ pub fn migrate_legacy(app: &AppHandle) {
         }
     }
     let json = old.join("settings.json");
-    let Ok(text) = std::fs::read_to_string(&json) else { return };
+    let Ok(text) = std::fs::read_to_string(&json) else {
+        return;
+    };
     let Ok(db) = open_db() else { return };
-    let has_row = db.query_row("SELECT 1 FROM kv WHERE key = 'settings'", [], |_| Ok(())).is_ok();
+    let has_row = db
+        .query_row("SELECT 1 FROM kv WHERE key = 'settings'", [], |_| Ok(()))
+        .is_ok();
     if !has_row {
         if let Ok(s) = serde_json::from_str::<Settings>(&text) {
             if save(&s).is_err() {
@@ -167,7 +182,12 @@ pub fn migrate_legacy(app: &AppHandle) {
 pub fn load() -> Settings {
     open_db()
         .ok()
-        .and_then(|db| db.query_row("SELECT value FROM kv WHERE key = 'settings'", [], |r| r.get::<_, String>(0)).ok())
+        .and_then(|db| {
+            db.query_row("SELECT value FROM kv WHERE key = 'settings'", [], |r| {
+                r.get::<_, String>(0)
+            })
+            .ok()
+        })
         .and_then(|s| serde_json::from_str::<Settings>(&s).ok())
         .unwrap_or_default()
 }
@@ -202,7 +222,11 @@ pub fn get_settings(state: State<'_, AppState>) -> Settings {
 }
 
 #[tauri::command]
-pub async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut settings: Settings) -> Result<Settings> {
+pub async fn save_settings(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    mut settings: Settings,
+) -> Result<Settings> {
     let previous = state.settings.lock().unwrap().clone();
     // Owned by their own commands; the UI's copy can be stale and would wipe them.
     settings.kubeconfig_folders = previous.kubeconfig_folders.clone();
@@ -226,17 +250,31 @@ pub async fn save_settings(app: AppHandle, state: State<'_, AppState>, mut setti
 
 /// Save a pasted kubeconfig into Kube Portal's own folder and return the contexts it added.
 #[tauri::command]
-pub async fn add_kubeconfig(state: State<'_, AppState>, name: String, yaml: String) -> Result<Vec<String>> {
-    let kc = Kubeconfig::from_yaml(&yaml).map_err(|e| format!("not a valid kubeconfig: {e}"))?;
+pub async fn add_kubeconfig(
+    state: State<'_, AppState>,
+    name: String,
+    yaml: String,
+) -> Result<Vec<String>> {
+    let kc = Kubeconfig::from_yaml(&yaml).map_err(strings::invalid_kubeconfig)?;
     if kc.contexts.is_empty() {
-        return Err("the kubeconfig has no contexts".into());
+        return Err(strings::KUBECONFIG_NO_CONTEXTS.into());
     }
     let safe: String = name
         .trim()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' { c } else { '-' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+                c
+            } else {
+                '-'
+            }
+        })
         .collect();
-    let safe = if safe.trim_matches('-').is_empty() { "cluster".to_string() } else { safe };
+    let safe = if safe.trim_matches('-').is_empty() {
+        "cluster".to_string()
+    } else {
+        safe
+    };
     let dir = managed_dir()?;
     std::fs::create_dir_all(&dir).map_err(err)?;
     let mut path = dir.join(format!("{safe}.yaml"));
@@ -247,7 +285,11 @@ pub async fn add_kubeconfig(state: State<'_, AppState>, name: String, yaml: Stri
     }
     write_private(&path, yaml.as_bytes()).map_err(err)?;
     let (entries, _, _) = state.rescan().await;
-    Ok(entries.into_iter().filter(|e| e.file.as_deref() == Some(&path)).map(|e| e.id).collect())
+    Ok(entries
+        .into_iter()
+        .filter(|e| e.file.as_deref() == Some(&path))
+        .map(|e| e.id)
+        .collect())
 }
 
 /// Delete a kubeconfig that was added through Kube Portal (only files in the managed folder).
@@ -256,7 +298,7 @@ pub async fn remove_added_kubeconfig(state: State<'_, AppState>, path: String) -
     let dir = managed_dir()?.canonicalize().map_err(err)?;
     let file = PathBuf::from(&path).canonicalize().map_err(err)?;
     if file.parent() != Some(dir.as_path()) {
-        return Err("only kubeconfigs added in Kube Portal can be removed here".into());
+        return Err(strings::KUBECONFIG_NOT_REMOVABLE.into());
     }
     std::fs::remove_file(&file).map_err(err)?;
     state.rescan().await;

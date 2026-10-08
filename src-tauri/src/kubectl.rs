@@ -11,11 +11,15 @@ use tauri::{AppHandle, Manager};
 use tokio::io::AsyncWriteExt;
 
 use crate::state::{err, Result};
+use crate::strings;
 
 /// "v1.34.1+k3s1" / "v1.29.4-eks-036c24b" -> "v1.34.1"
 pub fn normalize_version(git_version: &str) -> Option<String> {
     let v = git_version.trim().trim_start_matches('v');
-    let core: String = v.chars().take_while(|c| c.is_ascii_digit() || *c == '.').collect();
+    let core: String = v
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect();
     let parts: Vec<&str> = core.split('.').filter(|p| !p.is_empty()).collect();
     (parts.len() == 3).then(|| format!("v{}", parts.join(".")))
 }
@@ -32,12 +36,26 @@ fn platform() -> Option<(&'static str, &'static str, &'static str)> {
         "aarch64" => "arm64",
         _ => return None,
     };
-    Some((os, arch, if os == "windows" { "kubectl.exe" } else { "kubectl" }))
+    Some((
+        os,
+        arch,
+        if os == "windows" {
+            "kubectl.exe"
+        } else {
+            "kubectl"
+        },
+    ))
 }
 
 pub fn binary_path(app: &AppHandle, version: &str) -> Result<PathBuf> {
-    let (_, _, file) = platform().ok_or("unsupported platform for kubectl download")?;
-    Ok(app.path().app_data_dir().map_err(err)?.join("bin").join(format!("kubectl-{version}")).join(file))
+    let (_, _, file) = platform().ok_or(strings::KUBECTL_UNSUPPORTED_PLATFORM)?;
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(err)?
+        .join("bin")
+        .join(format!("kubectl-{version}"))
+        .join(file))
 }
 
 /// Return the cached kubectl for `version`, downloading and verifying it if needed.
@@ -46,9 +64,9 @@ pub async fn ensure(app: &AppHandle, version: &str, progress: impl Fn(&str)) -> 
     if path.exists() {
         return Ok(path);
     }
-    let (os, arch, file) = platform().ok_or("unsupported platform for kubectl download")?;
+    let (os, arch, file) = platform().ok_or(strings::KUBECTL_UNSUPPORTED_PLATFORM)?;
     let url = format!("https://dl.k8s.io/release/{version}/bin/{os}/{arch}/{file}");
-    progress(&format!("Downloading kubectl {version} to match the cluster…"));
+    progress(&strings::downloading_kubectl(version));
     // A stalled download would otherwise leave the terminal waiting forever.
     let http = reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(15))
@@ -61,17 +79,23 @@ pub async fn ensure(app: &AppHandle, version: &str, progress: impl Fn(&str)) -> 
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("kubectl checksum: {e}"))?
+        .map_err(strings::kubectl_checksum_error)?
         .text()
         .await
         .map_err(err)?;
-    let expected = expected.split_whitespace().next().unwrap_or_default().to_lowercase();
+    let expected = expected
+        .split_whitespace()
+        .next()
+        .unwrap_or_default()
+        .to_lowercase();
 
-    let dir = path.parent().ok_or("bad kubectl path")?;
+    let dir = path.parent().ok_or(strings::KUBECTL_BAD_PATH)?;
     tokio::fs::create_dir_all(dir).await.map_err(err)?;
     // Unique per download: two terminals fetching the same version mustn't share a partial file.
     let tmp = dir.join(format!("{file}.{}.download", uuid::Uuid::new_v4().simple()));
-    let result = download(&http, &url, &tmp, &expected, &progress).await.and_then(|_| make_executable(&tmp));
+    let result = download(&http, &url, &tmp, &expected, &progress)
+        .await
+        .and_then(|_| make_executable(&tmp));
     if let Err(e) = result {
         let _ = tokio::fs::remove_file(&tmp).await;
         return Err(e);
@@ -86,8 +110,19 @@ pub async fn ensure(app: &AppHandle, version: &str, progress: impl Fn(&str)) -> 
     Ok(path)
 }
 
-async fn download(http: &reqwest::Client, url: &str, tmp: &Path, expected: &str, progress: &impl Fn(&str)) -> Result<()> {
-    let resp = http.get(url).send().await.and_then(|r| r.error_for_status()).map_err(|e| format!("kubectl download: {e}"))?;
+async fn download(
+    http: &reqwest::Client,
+    url: &str,
+    tmp: &Path,
+    expected: &str,
+    progress: &impl Fn(&str),
+) -> Result<()> {
+    let resp = http
+        .get(url)
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(strings::kubectl_download_error)?;
     let total = resp.content_length();
     let mut out = tokio::fs::File::create(tmp).await.map_err(err)?;
     let mut hasher = Sha256::new();
@@ -103,7 +138,7 @@ async fn download(http: &reqwest::Client, url: &str, tmp: &Path, expected: &str,
             let pct = (got * 100 / t.max(1)) as u32;
             if pct >= last_pct + 20 {
                 last_pct = pct;
-                progress(&format!("  {pct}%"));
+                progress(&strings::download_progress(pct));
             }
         }
     }
@@ -111,7 +146,7 @@ async fn download(http: &reqwest::Client, url: &str, tmp: &Path, expected: &str,
     drop(out);
     let actual = hex::encode(hasher.finalize());
     if actual != expected {
-        return Err(format!("kubectl checksum mismatch (expected {expected}, got {actual})"));
+        return Err(strings::kubectl_checksum_mismatch(expected, &actual));
     }
     Ok(())
 }

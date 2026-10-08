@@ -11,6 +11,7 @@ import { toast } from "./components/Dialogs";
 import { openDetail, type Target } from "./actions";
 import { useTabs } from "./store";
 import { podUsage } from "./metrics";
+import { S } from "./strings";
 
 export interface KindFilter {
   group?: string;
@@ -81,7 +82,8 @@ function makeApi(ext: string, appVersion: string) {
   return Object.freeze({
     version: appVersion,
     registerCommand: (c: { id: string; label: string; run: () => void }) => add("commands", { ...c, ext }),
-    registerResourceAction: (a: { label: string; kinds?: KindFilter[]; run: (t: Target) => void }) => add("actions", { ...a, ext }),
+    registerResourceAction: (a: { label: string; kinds?: KindFilter[]; run: (t: Target) => void }) =>
+      add("actions", { ...a, ext }),
     registerDetailPanel: (p: Omit<ExtPanel, "ext">) => add("panels", { ...p, ext }),
     registerPage: (p: Omit<ExtPage, "ext">) => add("pages", { ...p, ext }),
     ui: {
@@ -99,7 +101,8 @@ function makeApi(ext: string, appVersion: string) {
       list: (context: string, resource: ResourceInfo, namespace?: string | null, labelSelector?: string | null) =>
         api.listObjects(context, resource, namespace, labelSelector),
       getYaml: (t: Target) => api.getYaml(t),
-      apply: (context: string, yaml: string, namespace?: string | null) => api.applyManifest(context, yaml, namespace ?? null),
+      apply: (context: string, yaml: string, namespace?: string | null) =>
+        api.applyManifest(context, yaml, namespace ?? null),
       delete: (t: Target) => api.deleteResource(t),
       patch: (t: Target, patch: unknown) => api.patchResource(t, patch),
       podMetrics: (context: string, namespace?: string | null) => podUsage(context, namespace ?? null),
@@ -130,7 +133,7 @@ export async function loadExtensions() {
     try {
       const mod = await import(/* @vite-ignore */ url);
       const activate = mod.default ?? mod.activate;
-      if (typeof activate !== "function") throw new Error("module has no default export or activate() function");
+      if (typeof activate !== "function") throw new Error(S.extensions.noActivate);
       await activate(makeApi(ext.id, appVersion));
     } catch (e) {
       console.error(`extension ${ext.id}:`, e);

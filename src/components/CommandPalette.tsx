@@ -5,7 +5,18 @@ import { api, type ContextInfo, type ResourceInfo } from "../api";
 import { loadDiscovery } from "../hooks";
 import { useSettings } from "../settings";
 import { useExtensions } from "../extensions";
-import { contextLabel, openCluster, openClusterSettings, openSession, openSingleton, pluralLabel, tabContext, tabTitle, useTabs } from "../store";
+import {
+  contextLabel,
+  openCluster,
+  openClusterSettings,
+  openSession,
+  openSingleton,
+  pluralLabel,
+  tabContext,
+  tabTitle,
+  useTabs,
+} from "../store";
+import { S } from "../strings";
 
 interface Command {
   id: string;
@@ -51,7 +62,11 @@ export function CommandPaletteHost() {
     setSel(0);
     api.listContexts().then(setContexts, () => setContexts([]));
     let cancelled = false;
-    if (activeCtx) loadDiscovery(activeCtx).then((r) => !cancelled && setResources(r), () => !cancelled && setResources([]));
+    if (activeCtx)
+      loadDiscovery(activeCtx).then(
+        (r) => !cancelled && setResources(r),
+        () => !cancelled && setResources([]),
+      );
     else setResources([]);
     return () => {
       cancelled = true;
@@ -63,15 +78,30 @@ export function CommandPaletteHost() {
     const cmds: Command[] = [];
     const clusterTab = active?.kind === "cluster" ? active : null;
     if (clusterTab) {
-      cmds.push({ id: "ov", group: "Go to", label: "Overview", run: () => T.update(clusterTab.id, { resource: null, page: undefined }) });
-      cmds.push({ id: "hr", group: "Go to", label: "Helm Releases", run: () => T.update(clusterTab.id, { resource: null, page: "releases" }) });
-      cmds.push({ id: "hc", group: "Go to", label: "Helm Charts", run: () => T.update(clusterTab.id, { resource: null, page: "charts" }) });
+      cmds.push({
+        id: "ov",
+        group: S.palette.goTo,
+        label: S.cluster.overview,
+        run: () => T.update(clusterTab.id, { resource: null, page: undefined }),
+      });
+      cmds.push({
+        id: "hr",
+        group: S.palette.goTo,
+        label: S.helm.releases,
+        run: () => T.update(clusterTab.id, { resource: null, page: "releases" }),
+      });
+      cmds.push({
+        id: "hc",
+        group: S.palette.goTo,
+        label: S.helm.charts,
+        run: () => T.update(clusterTab.id, { resource: null, page: "charts" }),
+      });
       for (const r of resources) {
         cmds.push({
           id: `r:${r.group}/${r.kind}`,
-          group: "Go to",
+          group: S.palette.goTo,
           label: pluralLabel(r),
-          hint: r.group || "core",
+          hint: r.group || S.palette.coreGroup,
           run: () => T.update(clusterTab.id, { resource: r, page: undefined }),
         });
       }
@@ -79,28 +109,87 @@ export function CommandPaletteHost() {
     for (const t of tabs) {
       if (t.id === activeId || t.kind === "home") continue;
       const ctx = tabContext(t);
-      cmds.push({ id: `t:${t.id}`, group: "Tabs", label: tabTitle(t), hint: ctx ? contextLabel(ctx) : undefined, run: () => T.activate(t.id) });
+      cmds.push({
+        id: `t:${t.id}`,
+        group: S.palette.tabs,
+        label: tabTitle(t),
+        hint: ctx ? contextLabel(ctx) : undefined,
+        run: () => T.activate(t.id),
+      });
     }
     for (const c of contexts) {
-      cmds.push({ id: `c:${c.name}`, group: "Clusters", label: contextLabel(c.name), hint: "open", run: () => openCluster(c.name, { focusExisting: true }) });
+      cmds.push({
+        id: `c:${c.name}`,
+        group: S.palette.clusters,
+        label: contextLabel(c.name),
+        hint: S.palette.open,
+        run: () => openCluster(c.name, { focusExisting: true }),
+      });
     }
     for (const c of useExtensions.getState().commands) {
-      cmds.push({ id: `x:${c.ext}:${c.id}`, group: "Extensions", label: c.label, hint: c.ext, run: c.run });
+      cmds.push({ id: `x:${c.ext}:${c.id}`, group: S.palette.extensions, label: c.label, hint: c.ext, run: c.run });
     }
     const st = useSettings.getState();
     cmds.push(
-      { id: "new", group: "Commands", label: "New Tab", hint: shortcut("T"), run: () => T.open({ kind: "home" }) },
-      { id: "close", group: "Commands", label: "Close Tab", hint: shortcut("W"), run: () => activeId && T.close(activeId) },
-      { id: "split", group: "Commands", label: T.splitId ? "Close Split View" : "Split View", hint: shortcut("\\"), run: () => T.toggleSplit() },
-      ...(activeCtx ? [{ id: "cterm", group: "Commands", label: `Terminal for ${contextLabel(activeCtx)}`, run: () => openSession({ kind: "terminal", context: activeCtx }) }] : []),
-      { id: "apply", group: "Commands", label: "Apply Manifest", run: () => T.open({ kind: "apply", context: activeCtx, namespace: null }) },
-      { id: "pf", group: "Commands", label: "Port Forwards", run: () => openSingleton("portforwards") },
-      { id: "settings", group: "Commands", label: "Settings", hint: shortcut(","), run: () => openSingleton("settings") },
-      ...(activeCtx ? [{ id: "csettings", group: "Commands", label: `Cluster Settings: ${contextLabel(activeCtx)}`, run: () => openClusterSettings(activeCtx) }] : []),
+      {
+        id: "new",
+        group: S.palette.commands,
+        label: S.tabs.newTab,
+        hint: shortcut("T"),
+        run: () => T.open({ kind: "home" }),
+      },
+      {
+        id: "close",
+        group: S.palette.commands,
+        label: S.tabs.closeTab,
+        hint: shortcut("W"),
+        run: () => activeId && T.close(activeId),
+      },
+      {
+        id: "split",
+        group: S.palette.commands,
+        label: T.splitId ? S.palette.closeSplitView : S.palette.splitView,
+        hint: shortcut("\\"),
+        run: () => T.toggleSplit(),
+      },
+      ...(activeCtx
+        ? [
+            {
+              id: "cterm",
+              group: S.palette.commands,
+              label: S.palette.terminalFor(contextLabel(activeCtx)),
+              run: () => openSession({ kind: "terminal", context: activeCtx }),
+            },
+          ]
+        : []),
+      {
+        id: "apply",
+        group: S.palette.commands,
+        label: S.apply.title,
+        run: () => T.open({ kind: "apply", context: activeCtx, namespace: null }),
+      },
+      { id: "pf", group: S.palette.commands, label: S.portForward.listTitle, run: () => openSingleton("portforwards") },
+      {
+        id: "settings",
+        group: S.palette.commands,
+        label: S.settings.title,
+        hint: shortcut(","),
+        run: () => openSingleton("settings"),
+      },
+      ...(activeCtx
+        ? [
+            {
+              id: "csettings",
+              group: S.palette.commands,
+              label: S.palette.clusterSettingsFor(contextLabel(activeCtx)),
+              run: () => openClusterSettings(activeCtx),
+            },
+          ]
+        : []),
       {
         id: "theme",
-        group: "Commands",
-        label: "Toggle Light / Dark Theme",
+        group: S.palette.commands,
+        label: S.palette.toggleTheme,
         run: () => {
           const s = st.settings;
           if (!s) return;
@@ -139,7 +228,7 @@ export function CommandPaletteHost() {
         <input
           className="input palette-input"
           autoFocus
-          placeholder="Type a command, cluster, tab or resource"
+          placeholder={S.palette.placeholder}
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
@@ -171,7 +260,7 @@ export function CommandPaletteHost() {
               </div>
             );
           })}
-          {results.length === 0 && <div className="muted pad">No matches</div>}
+          {results.length === 0 && <div className="muted pad">{S.common.noMatches}</div>}
         </div>
       </div>
     </div>

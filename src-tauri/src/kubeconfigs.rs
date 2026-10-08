@@ -13,6 +13,7 @@ use serde::Serialize;
 use tauri::{AppHandle, State};
 
 use crate::state::{err, AppState, Result};
+use crate::strings;
 
 /// Skip anything bigger than this; kubeconfigs are small and folders may hold other files.
 const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
@@ -75,14 +76,23 @@ pub struct FolderInfo {
 pub fn default_source_files() -> Vec<PathBuf> {
     let sep = if cfg!(windows) { ';' } else { ':' };
     match std::env::var("KUBECONFIG") {
-        Ok(v) if !v.is_empty() => v.split(sep).filter(|s| !s.is_empty()).map(PathBuf::from).collect(),
-        _ => dirs::home_dir().map(|h| vec![h.join(".kube").join("config")]).unwrap_or_default(),
+        Ok(v) if !v.is_empty() => v
+            .split(sep)
+            .filter(|s| !s.is_empty())
+            .map(PathBuf::from)
+            .collect(),
+        _ => dirs::home_dir()
+            .map(|h| vec![h.join(".kube").join("config")])
+            .unwrap_or_default(),
     }
 }
 
 /// Canonical default kubeconfig paths, so folder scans don't list them twice.
 fn default_paths() -> HashSet<PathBuf> {
-    default_source_files().into_iter().filter_map(|p| p.canonicalize().ok()).collect()
+    default_source_files()
+        .into_iter()
+        .filter_map(|p| p.canonicalize().ok())
+        .collect()
 }
 
 fn candidate_files(dir: &Path) -> std::io::Result<Vec<PathBuf>> {
@@ -121,7 +131,13 @@ fn looks_like_kubeconfig(path: &Path) -> bool {
                 .as_chunks::<2>()
                 .0
                 .iter()
-                .map(|c| if le { u16::from_le_bytes(*c) } else { u16::from_be_bytes(*c) })
+                .map(|c| {
+                    if le {
+                        u16::from_le_bytes(*c)
+                    } else {
+                        u16::from_be_bytes(*c)
+                    }
+                })
                 .collect();
             match String::from_utf16(&units) {
                 Ok(t) => t,
@@ -143,8 +159,13 @@ fn entries_from(kc: &Kubeconfig, file: Option<&Path>) -> Vec<ContextEntry> {
             let ctx = c.context.clone().unwrap_or_default();
             let mut h = std::collections::hash_map::DefaultHasher::new();
             let cluster = kc.clusters.iter().find(|n| n.name == ctx.cluster);
-            let user = kc.auth_infos.iter().find(|n| Some(&n.name) == ctx.user.as_ref());
-            serde_json::to_string(&(cluster, user)).unwrap_or_default().hash(&mut h);
+            let user = kc
+                .auth_infos
+                .iter()
+                .find(|n| Some(&n.name) == ctx.user.as_ref());
+            serde_json::to_string(&(cluster, user))
+                .unwrap_or_default()
+                .hash(&mut h);
             ContextEntry {
                 fingerprint: h.finish(),
                 id: c.name.clone(),
@@ -161,7 +182,10 @@ fn entries_from(kc: &Kubeconfig, file: Option<&Path>) -> Vec<ContextEntry> {
 }
 
 /// Scan all sources. Never fails outright: problems are reported per folder.
-pub fn scan(folders: &[PathBuf], managed: Option<&Path>) -> (Vec<ContextEntry>, Vec<FolderInfo>, Option<String>) {
+pub fn scan(
+    folders: &[PathBuf],
+    managed: Option<&Path>,
+) -> (Vec<ContextEntry>, Vec<FolderInfo>, Option<String>) {
     let mut entries = Vec::new();
     let mut default_error = None;
     match Kubeconfig::read() {
@@ -281,7 +305,7 @@ pub async fn add_kubeconfig_folder(
 ) -> Result<Vec<FolderInfo>> {
     let path = PathBuf::from(path);
     if !path.is_dir() {
-        return Err(format!("{} is not a folder", path.display()));
+        return Err(strings::not_a_folder(path.display()));
     }
     let settings = {
         let mut s = state.settings.lock().unwrap();

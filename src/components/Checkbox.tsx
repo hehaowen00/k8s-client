@@ -20,7 +20,17 @@ interface Props {
 }
 
 /** Themed replacement for <input type="checkbox"> (with optional label). */
-export function Checkbox({ checked, onChange, onClick, indeterminate, disabled, title, className, children, ...rest }: Props) {
+export function Checkbox({
+  checked,
+  onChange,
+  onClick,
+  indeterminate,
+  disabled,
+  title,
+  className,
+  children,
+  ...rest
+}: Props) {
   const state = indeterminate ? "mixed" : checked;
   return (
     <button
@@ -44,7 +54,14 @@ export function Checkbox({ checked, onChange, onClick, indeterminate, disabled, 
           </svg>
         ) : checked ? (
           <svg width="10" height="10" viewBox="0 0 10 10">
-            <path d="M1.8 5.2 4 7.3 8.2 2.8" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M1.8 5.2 4 7.3 8.2 2.8"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
         ) : null}
       </span>

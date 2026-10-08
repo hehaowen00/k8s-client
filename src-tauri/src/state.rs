@@ -9,6 +9,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::kube_ops::ResourceInfo;
 use crate::kubeconfigs::{self, ContextEntry, FolderInfo};
+use crate::strings;
 
 /// Input sent to an interactive session (pod exec or local pty).
 pub enum SessionInput {
@@ -97,9 +98,17 @@ impl AppState {
 
     /// One client per context. Concurrent first calls share a single build (one exec-auth run, e.g. `aws eks get-token`).
     pub async fn client(&self, context: &str) -> Result<Client> {
-        let cell = self.clients.lock().await.entry(context.to_string()).or_default().clone();
+        let cell = self
+            .clients
+            .lock()
+            .await
+            .entry(context.to_string())
+            .or_default()
+            .clone();
         // Errors aren't cached: the next call retries.
-        cell.get_or_try_init(|| self.build_client(context)).await.cloned()
+        cell.get_or_try_init(|| self.build_client(context))
+            .await
+            .cloned()
     }
 
     async fn build_client(&self, context: &str) -> Result<Client> {
@@ -108,7 +117,7 @@ impl AppState {
             self.rescan().await;
             entry = self.registry.lock().await.get(context).cloned();
         }
-        let entry = entry.ok_or_else(|| format!("context \"{context}\" not found in any kubeconfig"))?;
+        let entry = entry.ok_or_else(|| strings::context_not_found_in_kubeconfigs(context))?;
         let kubeconfig = kubeconfigs::load(&entry)?;
         let opts = KubeConfigOptions {
             context: Some(entry.name.clone()),
@@ -117,9 +126,16 @@ impl AppState {
         let mut config = Config::from_custom_kubeconfig(kubeconfig, &opts)
             .await
             .map_err(err)?;
-        let proxy = self.cluster_settings(context).proxy_url.filter(|p| !p.trim().is_empty());
+        let proxy = self
+            .cluster_settings(context)
+            .proxy_url
+            .filter(|p| !p.trim().is_empty());
         if let Some(p) = proxy {
-            config.proxy_url = Some(p.trim().parse().map_err(|e| format!("invalid proxy URL {p}: {e}"))?);
+            config.proxy_url = Some(
+                p.trim()
+                    .parse()
+                    .map_err(|e| strings::invalid_proxy_url(p, e))?,
+            );
         }
         // Client::try_from runs exec auth plugins synchronously; keep them off the async workers.
         tokio::task::spawn_blocking(move || Client::try_from(config))
@@ -130,14 +146,18 @@ impl AppState {
 
     /// Write a kubeconfig whose current-context is `context` (for local terminals) and return its path.
     /// Credentials are copied as-is, so the file is created with owner-only permissions.
-    pub async fn scoped_kubeconfig(&self, app: &tauri::AppHandle, context: &str) -> Result<PathBuf> {
+    pub async fn scoped_kubeconfig(
+        &self,
+        app: &tauri::AppHandle,
+        context: &str,
+    ) -> Result<PathBuf> {
         use tauri::Manager;
         let mut entry = self.registry.lock().await.get(context).cloned();
         if entry.is_none() {
             self.rescan().await;
             entry = self.registry.lock().await.get(context).cloned();
         }
-        let entry = entry.ok_or_else(|| format!("context \"{context}\" not found"))?;
+        let entry = entry.ok_or_else(|| strings::context_not_found(context))?;
         let mut kc = kubeconfigs::load(&entry)?;
         kc.current_context = Some(entry.name.clone());
         let yaml = serde_yaml::to_string(&kc).map_err(err)?;
@@ -145,7 +165,10 @@ impl AppState {
         std::fs::create_dir_all(&dir).map_err(err)?;
         // Hashed so that context names differing only in punctuation can't share a file.
         use sha2::{Digest, Sha256};
-        let path = dir.join(format!("{}.yaml", hex::encode(&Sha256::digest(context.as_bytes())[..16])));
+        let path = dir.join(format!(
+            "{}.yaml",
+            hex::encode(&Sha256::digest(context.as_bytes())[..16])
+        ));
         // Helm polls through here every few seconds; only write when the kubeconfig actually changed.
         if std::fs::read(&path).ok().as_deref() != Some(yaml.as_bytes()) {
             crate::settings::write_private(&path, yaml.as_bytes()).map_err(err)?;
@@ -154,7 +177,13 @@ impl AppState {
     }
 
     pub fn cluster_settings(&self, context: &str) -> crate::settings::ClusterSettings {
-        self.settings.lock().unwrap().clusters.get(context).cloned().unwrap_or_default()
+        self.settings
+            .lock()
+            .unwrap()
+            .clusters
+            .get(context)
+            .cloned()
+            .unwrap_or_default()
     }
 
     pub fn prometheus(&self, context: &str) -> Option<Option<crate::metrics::PrometheusTarget>> {
@@ -162,10 +191,18 @@ impl AppState {
     }
 
     pub fn set_prometheus(&self, context: &str, t: Option<crate::metrics::PrometheusTarget>) {
-        self.prometheus.lock().unwrap().insert(context.to_string(), t);
+        self.prometheus
+            .lock()
+            .unwrap()
+            .insert(context.to_string(), t);
     }
 
-    pub fn helm_list_cached(&self, context: &str, namespace: &str, fingerprint: u64) -> Option<serde_json::Value> {
+    pub fn helm_list_cached(
+        &self,
+        context: &str,
+        namespace: &str,
+        fingerprint: u64,
+    ) -> Option<serde_json::Value> {
         let lists = self.helm_lists.lock().unwrap();
         lists
             .get(&(context.to_string(), namespace.to_string()))
@@ -173,8 +210,17 @@ impl AppState {
             .map(|(_, v)| v.clone())
     }
 
-    pub fn store_helm_list(&self, context: &str, namespace: &str, fingerprint: u64, list: serde_json::Value) {
-        self.helm_lists.lock().unwrap().insert((context.to_string(), namespace.to_string()), (fingerprint, list));
+    pub fn store_helm_list(
+        &self,
+        context: &str,
+        namespace: &str,
+        fingerprint: u64,
+        list: serde_json::Value,
+    ) {
+        self.helm_lists.lock().unwrap().insert(
+            (context.to_string(), namespace.to_string()),
+            (fingerprint, list),
+        );
     }
 
     pub fn overview(&self, key: &(String, String)) -> Option<Arc<crate::overview::OverviewWatch>> {
@@ -196,7 +242,11 @@ impl AppState {
         (w, true)
     }
 
-    pub fn remove_overview(&self, key: &(String, String), watch: &Arc<crate::overview::OverviewWatch>) {
+    pub fn remove_overview(
+        &self,
+        key: &(String, String),
+        watch: &Arc<crate::overview::OverviewWatch>,
+    ) {
         let mut overviews = self.overviews.lock().unwrap();
         if overviews.get(key).is_some_and(|w| Arc::ptr_eq(w, watch)) {
             overviews.remove(key);
@@ -212,7 +262,10 @@ impl AppState {
             c != context
         });
         self.prometheus.lock().unwrap().remove(context);
-        self.helm_lists.lock().unwrap().retain(|(c, _), _| c != context);
+        self.helm_lists
+            .lock()
+            .unwrap()
+            .retain(|(c, _), _| c != context);
         self.clients.lock().await.remove(context);
         self.discovery.lock().await.remove(context);
     }
@@ -247,8 +300,9 @@ impl AppState {
 
     pub fn session_send(&self, id: &str, input: SessionInput) -> Result<()> {
         let sessions = self.sessions.lock().unwrap();
-        let tx = sessions.get(id).ok_or("session not found")?;
-        tx.send(input).map_err(|_| "session closed".to_string())
+        let tx = sessions.get(id).ok_or(strings::SESSION_NOT_FOUND)?;
+        tx.send(input)
+            .map_err(|_| strings::SESSION_CLOSED.to_string())
     }
 
     pub fn remove_session(&self, id: &str) {
@@ -256,7 +310,10 @@ impl AppState {
     }
 
     pub fn track_node_shell(&self, context: &str, pod: &str) {
-        self.node_shells.lock().unwrap().push((context.to_string(), pod.to_string()));
+        self.node_shells
+            .lock()
+            .unwrap()
+            .push((context.to_string(), pod.to_string()));
     }
 
     /// Best-effort delete of every node-shell pod from this run (already-deleted ones just 404).
@@ -264,11 +321,11 @@ impl AppState {
         let pods = std::mem::take(&mut *self.node_shells.lock().unwrap());
         let deletes = pods.into_iter().map(|(context, pod)| async move {
             if let Ok(client) = self.client(&context).await {
-                let api: kube::Api<k8s_openapi::api::core::v1::Pod> = kube::Api::namespaced(client, crate::nodeops::NODE_SHELL_NAMESPACE);
+                let api: kube::Api<k8s_openapi::api::core::v1::Pod> =
+                    kube::Api::namespaced(client, crate::nodeops::NODE_SHELL_NAMESPACE);
                 let _ = api.delete(&pod, &Default::default()).await;
             }
         });
         futures::future::join_all(deletes).await;
     }
 }
-

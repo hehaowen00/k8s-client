@@ -13,6 +13,7 @@ use serde_json::json;
 use tauri::State;
 
 use crate::state::{kerr, AppState, Result};
+use crate::strings;
 
 pub const NODE_SHELL_NAMESPACE: &str = "kube-system";
 const NODE_SHELL_LABEL: &str = "kubetab.dev/node-shell";
@@ -39,10 +40,18 @@ fn pod_key(p: &Pod) -> String {
 /// like `kubectl drain --ignore-daemonsets --delete-emptydir-data`. Pods without a controller
 /// are refused, as kubectl does without `--force`: evicting them would delete them for good.
 #[tauri::command]
-pub async fn drain_node(state: State<'_, AppState>, context: String, node: String) -> Result<DrainResult> {
+pub async fn drain_node(
+    state: State<'_, AppState>,
+    context: String,
+    node: String,
+) -> Result<DrainResult> {
     let client = state.client(&context).await?;
     Api::<Node>::all(client.clone())
-        .patch(&node, &PatchParams::default(), &Patch::Merge(json!({ "spec": { "unschedulable": true } })))
+        .patch(
+            &node,
+            &PatchParams::default(),
+            &Patch::Merge(json!({ "spec": { "unschedulable": true } })),
+        )
         .await
         .map_err(kerr)?;
 
@@ -50,18 +59,31 @@ pub async fn drain_node(state: State<'_, AppState>, context: String, node: Strin
         .list(&ListParams::default().fields(&format!("spec.nodeName={node}")))
         .await
         .map_err(kerr)?;
-    let mut result = DrainResult { evicted: vec![], skipped: vec![], failed: vec![], pending: vec![] };
+    let mut result = DrainResult {
+        evicted: vec![],
+        skipped: vec![],
+        failed: vec![],
+        pending: vec![],
+    };
     let mut to_evict = Vec::new();
     for p in pods.items {
         let key = pod_key(&p);
-        let phase = p.status.as_ref().and_then(|s| s.phase.as_deref()).unwrap_or_default();
+        let phase = p
+            .status
+            .as_ref()
+            .and_then(|s| s.phase.as_deref())
+            .unwrap_or_default();
         let owners = p.metadata.owner_references.as_deref().unwrap_or_default();
         let is_ds = owners.iter().any(|o| o.kind == "DaemonSet");
-        let is_mirror = p.metadata.annotations.as_ref().is_some_and(|a| a.contains_key("kubernetes.io/config.mirror"));
+        let is_mirror = p
+            .metadata
+            .annotations
+            .as_ref()
+            .is_some_and(|a| a.contains_key("kubernetes.io/config.mirror"));
         if is_ds || is_mirror || phase == "Succeeded" || phase == "Failed" {
             result.skipped.push(key);
         } else if !owners.iter().any(|o| o.controller == Some(true)) {
-            result.failed.push(format!("{key}: not managed by a controller; delete it yourself if it can go"));
+            result.failed.push(strings::drain_unmanaged_pod(&key));
         } else {
             to_evict.push(p);
         }
@@ -76,7 +98,10 @@ pub async fn drain_node(state: State<'_, AppState>, context: String, node: Strin
             let key = pod_key(&p);
             let ns = p.metadata.namespace.clone().unwrap_or_default();
             let name = p.metadata.name.clone().unwrap_or_default();
-            match Api::<Pod>::namespaced(client.clone(), &ns).evict(&name, &EvictParams::default()).await {
+            match Api::<Pod>::namespaced(client.clone(), &ns)
+                .evict(&name, &EvictParams::default())
+                .await
+            {
                 Ok(_) => {
                     result.evicted.push(key);
                     evicted_pods.push((ns, name, p.metadata.uid.clone()));
@@ -90,7 +115,11 @@ pub async fn drain_node(state: State<'_, AppState>, context: String, node: Strin
             break;
         }
         if tokio::time::Instant::now() >= deadline {
-            result.failed.extend(blocked.iter().map(|(p, msg)| format!("{}: {msg}", pod_key(p))));
+            result.failed.extend(
+                blocked
+                    .iter()
+                    .map(|(p, msg)| format!("{}: {msg}", pod_key(p))),
+            );
             break;
         }
         to_evict = blocked.into_iter().map(|(p, _)| p).collect();
@@ -102,7 +131,10 @@ pub async fn drain_node(state: State<'_, AppState>, context: String, node: Strin
     loop {
         let mut remaining = Vec::new();
         for (ns, name, uid) in &evicted_pods {
-            if let Ok(Some(p)) = Api::<Pod>::namespaced(client.clone(), ns).get_opt(name).await {
+            if let Ok(Some(p)) = Api::<Pod>::namespaced(client.clone(), ns)
+                .get_opt(name)
+                .await
+            {
                 if p.metadata.uid == *uid {
                     remaining.push(format!("{ns}/{name}"));
                 }
@@ -127,11 +159,18 @@ pub struct NodeShellPod {
 /// Start a privileged pod on `node` that can `nsenter` into the host (like Lens' node shell).
 /// The pod self-destructs after a few hours in case the app never cleans it up.
 #[tauri::command]
-pub async fn node_shell_create(state: State<'_, AppState>, context: String, node: String) -> Result<NodeShellPod> {
+pub async fn node_shell_create(
+    state: State<'_, AppState>,
+    context: String,
+    node: String,
+) -> Result<NodeShellPod> {
     let client = state.client(&context).await?;
     let api: Api<Pod> = Api::namespaced(client, NODE_SHELL_NAMESPACE);
     let node_hash = hex::encode(&<sha2::Sha256 as sha2::Digest>::digest(node.as_bytes())[..8]);
-    let name = format!("node-shell-{}", &uuid::Uuid::new_v4().simple().to_string()[..8]);
+    let name = format!(
+        "node-shell-{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..8]
+    );
     let pod: Pod = serde_json::from_value(json!({
         "apiVersion": "v1",
         "kind": "Pod",
@@ -162,7 +201,9 @@ pub async fn node_shell_create(state: State<'_, AppState>, context: String, node
         }
     }))
     .map_err(|e| e.to_string())?;
-    api.create(&PostParams::default(), &pod).await.map_err(kerr)?;
+    api.create(&PostParams::default(), &pod)
+        .await
+        .map_err(kerr)?;
     state.track_node_shell(&context, &name);
 
     let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
@@ -179,7 +220,9 @@ pub async fn node_shell_create(state: State<'_, AppState>, context: String, node
             Some("Running") => break,
             Some("Failed") | Some("Succeeded") => {
                 let _ = api.delete(&name, &DeleteParams::default()).await;
-                return Err(format!("node shell pod ended: {}", status.message.unwrap_or_default()));
+                return Err(strings::node_shell_ended(
+                    &status.message.unwrap_or_default(),
+                ));
             }
             _ => {}
         }
@@ -188,25 +231,44 @@ pub async fn node_shell_create(state: State<'_, AppState>, context: String, node
             .unwrap_or_default()
             .into_iter()
             .filter_map(|c| c.state.and_then(|s| s.waiting))
-            .find(|w| matches!(w.reason.as_deref(), Some("ErrImagePull" | "ImagePullBackOff" | "CreateContainerError")));
+            .find(|w| {
+                matches!(
+                    w.reason.as_deref(),
+                    Some("ErrImagePull" | "ImagePullBackOff" | "CreateContainerError")
+                )
+            });
         if let Some(w) = waiting {
             let _ = api.delete(&name, &DeleteParams::default()).await;
-            return Err(format!("node shell pod failed: {} {}", w.reason.unwrap_or_default(), w.message.unwrap_or_default()));
+            return Err(strings::node_shell_failed(
+                &w.reason.unwrap_or_default(),
+                &w.message.unwrap_or_default(),
+            ));
         }
         if tokio::time::Instant::now() >= deadline {
             let _ = api.delete(&name, &DeleteParams::default()).await;
-            return Err("timed out waiting for node shell pod to start".into());
+            return Err(strings::NODE_SHELL_TIMEOUT.into());
         }
         tokio::time::sleep(Duration::from_millis(700)).await;
     }
-    Ok(NodeShellPod { namespace: NODE_SHELL_NAMESPACE.into(), pod: name })
+    Ok(NodeShellPod {
+        namespace: NODE_SHELL_NAMESPACE.into(),
+        pod: name,
+    })
 }
 
 /// Create a Job from a CronJob's template now (`kubectl create job --from=cronjob/...`).
 #[tauri::command]
-pub async fn trigger_cronjob(state: State<'_, AppState>, context: String, namespace: String, name: String) -> Result<String> {
+pub async fn trigger_cronjob(
+    state: State<'_, AppState>,
+    context: String,
+    namespace: String,
+    name: String,
+) -> Result<String> {
     let client = state.client(&context).await?;
-    let cj = Api::<CronJob>::namespaced(client.clone(), &namespace).get(&name).await.map_err(kerr)?;
+    let cj = Api::<CronJob>::namespaced(client.clone(), &namespace)
+        .get(&name)
+        .await
+        .map_err(kerr)?;
     let template = cj.spec.job_template.clone();
     let suffix = k8s_openapi::jiff::Timestamp::now().as_second() % 100_000;
     let base: String = name.chars().take(52).collect();
@@ -234,6 +296,9 @@ pub async fn trigger_cronjob(state: State<'_, AppState>, context: String, namesp
         spec: template.spec,
         ..Default::default()
     };
-    Api::<Job>::namespaced(client, &namespace).create(&PostParams::default(), &job).await.map_err(kerr)?;
+    Api::<Job>::namespaced(client, &namespace)
+        .create(&PostParams::default(), &job)
+        .await
+        .map_err(kerr)?;
     Ok(job_name)
 }

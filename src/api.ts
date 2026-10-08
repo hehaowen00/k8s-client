@@ -138,10 +138,7 @@ export type TableEvent =
   | { type: "delete"; uids: string[] }
   | { type: "error"; message: string };
 
-export type LogEvent =
-  | { type: "lines"; lines: string[] }
-  | { type: "end" }
-  | { type: "error"; message: string };
+export type LogEvent = { type: "lines"; lines: string[] } | { type: "end" } | { type: "error"; message: string };
 
 export interface TaggedLine {
   pod: string;
@@ -158,9 +155,7 @@ export type MultiLogEvent =
   | { type: "sources"; sources: LogSource[] }
   | { type: "error"; message: string };
 
-export type SessionEvent =
-  | { type: "data"; data: string }
-  | { type: "exit"; message?: string | null };
+export type SessionEvent = { type: "data"; data: string } | { type: "exit"; message?: string | null };
 
 export type ObjectEvent =
   | { type: "reset"; items: KubeObject[] }
@@ -219,7 +214,13 @@ const sharedStreams = new Map<string, unknown>();
 const SHARED_LINGER_MS = 5000;
 
 /** One backend stream per key, shared by every subscriber; late subscribers get the current state as a reset. */
-function sharedStream<E>(key: string, command: string, args: Record<string, unknown>, tracker: () => Tracker<E>, onEvent: (e: E) => void): () => void {
+function sharedStream<E>(
+  key: string,
+  command: string,
+  args: Record<string, unknown>,
+  tracker: () => Tracker<E>,
+  onEvent: (e: E) => void,
+): () => void {
   let s = sharedStreams.get(key) as Shared<E> | undefined;
   if (!s) {
     const t = tracker();
@@ -272,7 +273,8 @@ function tableTracker(): Tracker<TableEvent> {
       else if (e.type === "delete") e.uids.forEach((uid) => rows.delete(uid));
       else error = e.message;
     },
-    snapshot: () => (columns ? { type: "reset", columns, rows: [...rows.values()] } : error ? { type: "error", message: error } : null),
+    snapshot: () =>
+      columns ? { type: "reset", columns, rows: [...rows.values()] } : error ? { type: "error", message: error } : null,
     error: (message) => ({ type: "error", message }),
   };
 }
@@ -293,13 +295,29 @@ function objectTracker(): Tracker<ObjectEvent> {
       else if (e.type === "delete") items.delete(uid(e.object));
       else error = e.message;
     },
-    snapshot: () => (listed ? { type: "reset", items: [...items.values()] } : error ? { type: "error", message: error } : null),
+    snapshot: () =>
+      listed ? { type: "reset", items: [...items.values()] } : error ? { type: "error", message: error } : null,
     error: (message) => ({ type: "error", message }),
   };
 }
 
-const streamKey = (command: string, context: string, r: ResourceInfo, namespace: string | null, selectors?: { labelSelector?: string | null; fieldSelector?: string | null }) =>
-  JSON.stringify([command, context, r.group, r.version, r.plural, namespace, selectors?.labelSelector || null, selectors?.fieldSelector || null]);
+const streamKey = (
+  command: string,
+  context: string,
+  r: ResourceInfo,
+  namespace: string | null,
+  selectors?: { labelSelector?: string | null; fieldSelector?: string | null },
+) =>
+  JSON.stringify([
+    command,
+    context,
+    r.group,
+    r.version,
+    r.plural,
+    namespace,
+    selectors?.labelSelector || null,
+    selectors?.fieldSelector || null,
+  ]);
 
 export const api = {
   listContexts: () => invoke<ContextInfo[]>("list_contexts"),
@@ -353,11 +371,17 @@ export const api = {
     invoke<(number | null)[]>("count_resources", { context, resources, namespace }),
   canI: (
     context: string,
-    checks: { group: string; resource: string; subresource?: string; verb: string; namespace?: string | null; name?: string }[],
+    checks: {
+      group: string;
+      resource: string;
+      subresource?: string;
+      verb: string;
+      namespace?: string | null;
+      name?: string;
+    }[],
   ) => invoke<boolean[]>("can_i", { context, checks }),
   reconnect: (context: string) => invoke<void>("reconnect", { context }),
-  discover: (context: string, refresh = false) =>
-    invoke<ResourceInfo[]>("discover", { context, refresh }),
+  discover: (context: string, refresh = false) => invoke<ResourceInfo[]>("discover", { context, refresh }),
   listNamespaces: (context: string) => invoke<string[]>("list_namespaces", { context }),
 
   watchResources: (
@@ -396,13 +420,17 @@ export const api = {
     invoke<KubeObject[]>("list_objects", { context, resource, namespace, labelSelector }),
   getYaml: (r: ObjRef) => invoke<string>("get_yaml", { ...r }),
   /** `originalYaml` lets the backend rebase over status-only changes on conflict. */
-  replaceYaml: (r: ObjRef, yaml: string, originalYaml?: string | null) => invoke<string>("replace_yaml", { ...r, yaml, originalYaml }),
+  replaceYaml: (r: ObjRef, yaml: string, originalYaml?: string | null) =>
+    invoke<string>("replace_yaml", { ...r, yaml, originalYaml }),
   deleteResource: (r: ObjRef) => invoke<void>("delete_resource", { ...r }),
   scaleResource: (r: ObjRef, replicas: number) => invoke<void>("scale_resource", { ...r, replicas }),
   restartResource: (r: ObjRef) => invoke<void>("restart_resource", { ...r }),
   patchResource: (r: ObjRef, patch: unknown) => invoke<void>("patch_resource", { ...r, patch }),
   drainNode: (context: string, node: string) =>
-    invoke<{ evicted: string[]; skipped: string[]; failed: string[]; pending: string[] }>("drain_node", { context, node }),
+    invoke<{ evicted: string[]; skipped: string[]; failed: string[]; pending: string[] }>("drain_node", {
+      context,
+      node,
+    }),
   nodeShellCreate: (context: string, node: string) =>
     invoke<{ namespace: string; pod: string }>("node_shell_create", { context, node }),
   triggerCronjob: (context: string, namespace: string, name: string) =>
@@ -422,10 +450,7 @@ export const api = {
       sinceSeconds?: number | null;
     },
     onEvent: (e: LogEvent) => void,
-  ) =>
-    startStream<LogEvent>("stream_logs", opts, onEvent, (message) =>
-      onEvent({ type: "error", message }),
-    ),
+  ) => startStream<LogEvent>("stream_logs", opts, onEvent, (message) => onEvent({ type: "error", message })),
 
   /** Logs from every pod matching `selector`, or every container of `pod`. */
   streamMultiLogs: (
@@ -440,10 +465,7 @@ export const api = {
       sinceSeconds?: number | null;
     },
     onEvent: (e: MultiLogEvent) => void,
-  ) =>
-    startStream<MultiLogEvent>("stream_multi_logs", opts, onEvent, (message) =>
-      onEvent({ type: "error", message }),
-    ),
+  ) => startStream<MultiLogEvent>("stream_multi_logs", opts, onEvent, (message) => onEvent({ type: "error", message })),
 
   execStart: (
     opts: {
@@ -461,13 +483,11 @@ export const api = {
   ptyStart: (opts: { cols: number; rows: number; context: string }, channel: Channel<SessionEvent>) =>
     invoke<string>("pty_start", { ...opts, channel }),
   sessionWrite: (id: string, data: string) => invoke<void>("session_write", { id, data }),
-  sessionResize: (id: string, cols: number, rows: number) =>
-    invoke<void>("session_resize", { id, cols, rows }),
+  sessionResize: (id: string, cols: number, rows: number) => invoke<void>("session_resize", { id, cols, rows }),
   sessionClose: (id: string) => invoke<void>("session_close", { id }),
 };
 
-export const resourceKey = (r: Pick<ResourceInfo, "group" | "kind">) =>
-  `${r.group || "core"}/${r.kind}`;
+export const resourceKey = (r: Pick<ResourceInfo, "group" | "kind">) => `${r.group || "core"}/${r.kind}`;
 
 /** Resources that can be scaled / restarted via spec.replicas / pod template. */
 export const isScalable = (r: ResourceInfo) =>

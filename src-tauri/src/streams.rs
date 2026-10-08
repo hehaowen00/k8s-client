@@ -10,7 +10,8 @@ use tauri::{AppHandle, Manager, State};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::sync::mpsc;
 
-use crate::state::{kerr, err, AppState, Result, SessionInput};
+use crate::state::{err, kerr, AppState, Result, SessionInput};
+use crate::strings;
 
 #[derive(Serialize, Clone)]
 #[serde(tag = "type", rename_all = "camelCase")]
@@ -173,7 +174,7 @@ pub async fn exec_start(
             .containers
             .iter()
             .find(|c| container.as_deref().is_none_or(|n| n == c.name))
-            .ok_or("container not found")?;
+            .ok_or(strings::CONTAINER_NOT_FOUND)?;
         (c.tty.unwrap_or(false), c.stdin.unwrap_or(false))
     } else {
         (true, true)
@@ -199,11 +200,16 @@ pub async fn exec_start(
         api.exec(&pod, command, &ap).await.map_err(kerr)?
     };
     let mut stdin = proc.stdin();
-    let stdout = proc.stdout().ok_or("no stdout")?;
+    let stdout = proc.stdout().ok_or(strings::NO_STDOUT)?;
     let stderr = proc.stderr();
     let mut size_tx = if tty { proc.terminal_size() } else { None };
     if let Some(tx) = size_tx.as_mut() {
-        let _ = tx.send(TerminalSize { width: cols, height: rows }).await;
+        let _ = tx
+            .send(TerminalSize {
+                width: cols,
+                height: rows,
+            })
+            .await;
     }
 
     let id = uuid::Uuid::new_v4().to_string();
@@ -228,7 +234,12 @@ pub async fn exec_start(
                 }
                 SessionInput::Resize { cols, rows } => {
                     if let Some(tx) = size_tx.as_mut() {
-                        let _ = tx.send(TerminalSize { width: cols, height: rows }).await;
+                        let _ = tx
+                            .send(TerminalSize {
+                                width: cols,
+                                height: rows,
+                            })
+                            .await;
                     }
                 }
             }
@@ -314,12 +325,29 @@ pub async fn pty_start(
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 
     let pty = native_pty_system()
-        .openpty(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
         .map_err(err)?;
-    let configured = state.settings.lock().unwrap().terminal_shell.clone().filter(|s| !s.trim().is_empty());
-    let shell = configured.or_else(|| std::env::var("SHELL").ok()).unwrap_or_else(|| {
-        if cfg!(windows) { "powershell.exe".into() } else { "/bin/sh".into() }
-    });
+    let configured = state
+        .settings
+        .lock()
+        .unwrap()
+        .terminal_shell
+        .clone()
+        .filter(|s| !s.trim().is_empty());
+    let shell = configured
+        .or_else(|| std::env::var("SHELL").ok())
+        .unwrap_or_else(|| {
+            if cfg!(windows) {
+                "powershell.exe".into()
+            } else {
+                "/bin/sh".into()
+            }
+        });
     let mut cmd = CommandBuilder::new(shell);
     if let Some(home) = dirs_home() {
         cmd.cwd(home);
@@ -327,7 +355,11 @@ pub async fn pty_start(
     cmd.env("TERM", "xterm-256color");
     // Point kubectl (and anything else reading KUBECONFIG) at this cluster only, through its proxy.
     cmd.env("KUBECONFIG", state.scoped_kubeconfig(&app, &context).await?);
-    if let Some(p) = state.cluster_settings(&context).proxy_url.filter(|p| !p.trim().is_empty()) {
+    if let Some(p) = state
+        .cluster_settings(&context)
+        .proxy_url
+        .filter(|p| !p.trim().is_empty())
+    {
         cmd.env("HTTPS_PROXY", &p);
         cmd.env("HTTP_PROXY", &p);
     }
@@ -335,21 +367,33 @@ pub async fn pty_start(
     // the cluster's version.
     let (kubectl_path, kubectl_auto) = {
         let s = state.settings.lock().unwrap();
-        (s.kubectl_path.clone().filter(|p| !p.trim().is_empty()).map(std::path::PathBuf::from), s.kubectl_auto)
+        (
+            s.kubectl_path
+                .clone()
+                .filter(|p| !p.trim().is_empty())
+                .map(std::path::PathBuf::from),
+            s.kubectl_auto,
+        )
     };
     let mut kubectl = kubectl_path;
     if kubectl.is_none() && kubectl_auto {
         let note = |m: &str| {
-            let _ = channel.send(SessionEvent::Data { data: format!("\x1b[2m{m}\x1b[0m\r\n") });
+            let _ = channel.send(SessionEvent::Data {
+                data: format!("\x1b[2m{m}\x1b[0m\r\n"),
+            });
         };
         let version = match state.client(&context).await {
-            Ok(c) => c.apiserver_version().await.ok().and_then(|v| crate::kubectl::normalize_version(&v.git_version)),
+            Ok(c) => c
+                .apiserver_version()
+                .await
+                .ok()
+                .and_then(|v| crate::kubectl::normalize_version(&v.git_version)),
             Err(_) => None,
         };
         if let Some(v) = version {
             match crate::kubectl::ensure(&app, &v, note).await {
                 Ok(p) => kubectl = Some(p),
-                Err(e) => note(&format!("Using kubectl from PATH ({e})")),
+                Err(e) => note(&strings::using_kubectl_from_path(e)),
             }
         }
     }
@@ -382,7 +426,12 @@ pub async fn pty_start(
                     }
                 }
                 SessionInput::Resize { cols, rows } => {
-                    let _ = master.resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 });
+                    let _ = master.resize(PtySize {
+                        rows,
+                        cols,
+                        pixel_width: 0,
+                        pixel_height: 0,
+                    });
                 }
             }
         }
@@ -412,7 +461,7 @@ pub async fn pty_start(
         app.state::<AppState>().remove_session(&session_id);
         let message = match status {
             Ok(s) if s.success() => None,
-            Ok(s) => Some(format!("exited with code {}", s.exit_code())),
+            Ok(s) => Some(strings::exited_with_code(s.exit_code())),
             Err(e) => Some(e.to_string()),
         };
         let _ = channel.send(SessionEvent::Exit { message });

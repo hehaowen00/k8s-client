@@ -1,6 +1,7 @@
 import { Children, isValidElement, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { ReactElement, ReactNode } from "react";
 import { createPortal } from "react-dom";
+import { S } from "../strings";
 
 interface Option {
   value: string;
@@ -22,7 +23,12 @@ function textOf(node: ReactNode): string {
 function collectOptions(children: ReactNode, out: Option[] = []): Option[] {
   Children.forEach(children, (child) => {
     if (!isValidElement(child)) return;
-    const el = child as ReactElement<{ value?: string | number; children?: ReactNode; title?: string; disabled?: boolean }>;
+    const el = child as ReactElement<{
+      value?: string | number;
+      children?: ReactNode;
+      title?: string;
+      disabled?: boolean;
+    }>;
     if (el.type === "option") {
       const label = textOf(el.props.children);
       out.push({ value: String(el.props.value ?? label), label, title: el.props.title, disabled: el.props.disabled });
@@ -61,7 +67,9 @@ export function Select({ value, onChange, children, className, title, disabled, 
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
-  const [pos, setPos] = useState<{ left: number; top: number; width: number; maxHeight: number; up: boolean } | null>(null);
+  const [pos, setPos] = useState<{ left: number; top: number; width: number; maxHeight: number; up: boolean } | null>(
+    null,
+  );
   const buttonRef = useRef<HTMLButtonElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const popRef = useRef<HTMLDivElement>(null);
@@ -70,7 +78,9 @@ export function Select({ value, onChange, children, className, title, disabled, 
 
   const searchable = options.length > SEARCH_THRESHOLD;
   const q = query.trim().toLowerCase();
-  const shown = q ? options.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)) : options;
+  const shown = q
+    ? options.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q))
+    : options;
 
   const place = () => {
     const b = buttonRef.current?.getBoundingClientRect();
@@ -91,7 +101,12 @@ export function Select({ value, onChange, children, className, title, disabled, 
     if (disabled) return;
     onFocus?.();
     setQuery("");
-    setCursor(Math.max(0, options.findIndex((o) => o.value === current)));
+    setCursor(
+      Math.max(
+        0,
+        options.findIndex((o) => o.value === current),
+      ),
+    );
     place();
     setOpen(true);
   };
@@ -209,7 +224,14 @@ export function Select({ value, onChange, children, className, title, disabled, 
       >
         <span className="select-value">{selected?.label ?? ""}</span>
         <svg className="select-caret" width="10" height="10" viewBox="0 0 10 10" aria-hidden>
-          <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M2 3.5 5 6.5 8 3.5"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       </button>
       {open &&
@@ -225,7 +247,7 @@ export function Select({ value, onChange, children, className, title, disabled, 
               <input
                 className="input select-search"
                 autoFocus
-                placeholder="Filter"
+                placeholder={S.common.filter}
                 value={query}
                 onChange={(e) => {
                   setQuery(e.target.value);
@@ -258,14 +280,21 @@ export function Select({ value, onChange, children, className, title, disabled, 
                   <span className="select-check" aria-hidden>
                     {o.value === current && (
                       <svg width="12" height="12" viewBox="0 0 12 12">
-                        <path d="M2.5 6.2 5 8.5 9.5 3.5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+                        <path
+                          d="M2.5 6.2 5 8.5 9.5 3.5"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.6"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
                       </svg>
                     )}
                   </span>
                   <span className="select-label">{o.label}</span>
                 </div>
               ))}
-              {shown.length === 0 && <div className="select-empty">No matches</div>}
+              {shown.length === 0 && <div className="select-empty">{S.common.noMatches}</div>}
             </div>
           </div>,
           document.body,

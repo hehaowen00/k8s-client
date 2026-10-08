@@ -5,18 +5,19 @@ import { useTabs, type Tab } from "../store";
 import { hasAnsi, parseAnsi, stripAnsi } from "../ansi";
 import { Select } from "../components/Select";
 import { Checkbox } from "../components/Checkbox";
+import { S } from "../strings";
 
 const MAX_LINES = 100_000;
 const LINE_HEIGHT = 18;
 /** Wrapped lines have variable height, so wrap mode renders only the newest lines (unvirtualised). */
 const WRAP_LIMIT = 5000;
 const SINCE_OPTIONS: [number, string][] = [
-  [0, "Any time"],
-  [300, "Last 5m"],
-  [900, "Last 15m"],
-  [3600, "Last 1h"],
-  [6 * 3600, "Last 6h"],
-  [24 * 3600, "Last 24h"],
+  [0, S.logs.anyTime],
+  [300, S.logs.last("5m")],
+  [900, S.logs.last("15m")],
+  [3600, S.logs.last("1h")],
+  [6 * 3600, S.logs.last("6h")],
+  [24 * 3600, S.logs.last("24h")],
 ];
 const ALL = "*";
 
@@ -33,7 +34,8 @@ interface Line {
   raw?: string;
 }
 
-const toLine = (src: number, s: string): Line => (hasAnsi(s) ? { n: 0, src, text: stripAnsi(s), raw: s } : { n: 0, src, text: s });
+const toLine = (src: number, s: string): Line =>
+  hasAnsi(s) ? { n: 0, src, text: stripAnsi(s), raw: s } : { n: 0, src, text: s };
 
 /** First index in `a` whose `n` is >= `n` (`a` is ordered by `n`). */
 function lowerBound<T>(a: T[], n: number, key: (x: T) => number): number {
@@ -76,7 +78,14 @@ function renderText(line: Line, test: RegExp | null) {
   return line.text;
 }
 
-const LogRow = memo(function LogRow(props: { line: Line; prefix: string; color?: string; current: boolean; test: RegExp | null; top?: number }) {
+const LogRow = memo(function LogRow(props: {
+  line: Line;
+  prefix: string;
+  color?: string;
+  current: boolean;
+  test: RegExp | null;
+  top?: number;
+}) {
   const { line, prefix, color, current, test, top } = props;
   return (
     <div
@@ -105,7 +114,15 @@ function hue(s: string) {
   return `hsl(${h % 360} 65% 68%)`;
 }
 
-export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: boolean; onUpdate?: (patch: Partial<LogsTab>) => void }) {
+export function LogsView({
+  tab,
+  active,
+  onUpdate,
+}: {
+  tab: LogsTab;
+  active: boolean;
+  onUpdate?: (patch: Partial<LogsTab>) => void;
+}) {
   const updateTab = useTabs((s) => s.update);
   // Dock items persist their choices in the host tab's dock; top-level tabs in the tab itself.
   const update = (_id: string, patch: Partial<LogsTab>) => (onUpdate ? onUpdate(patch) : updateTab(tab.id, patch));
@@ -157,11 +174,14 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     // Inline items only have a width while shown; when hidden, reuse the last measurement.
     if ((bar.querySelector(".logs-wide > *") as HTMLElement | null)?.offsetWidth) {
       const cs = getComputedStyle(bar);
-      const items = [...bar.querySelectorAll<HTMLElement>(":scope > :not(.spacer, .logs-wide), :scope > .logs-wide > *")];
+      const items = [
+        ...bar.querySelectorAll<HTMLElement>(":scope > :not(.spacer, .logs-wide), :scope > .logs-wide > *"),
+      ];
       needW.current =
         items.reduce((w, el) => w + el.offsetWidth, 0) +
         parseFloat(cs.columnGap) * (items.length - 1) +
-        parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
+        parseFloat(cs.paddingLeft) +
+        parseFloat(cs.paddingRight);
     }
     setNarrow(bar.clientWidth < needW.current);
   };
@@ -253,7 +273,16 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
       );
     }
     return api.streamLogs(
-      { context: tab.context, namespace: tab.namespace, pod: tab.pod!, container, tailLines, previous, timestamps, sinceSeconds },
+      {
+        context: tab.context,
+        namespace: tab.namespace,
+        pod: tab.pod!,
+        container,
+        tailLines,
+        previous,
+        timestamps,
+        sinceSeconds,
+      },
       (e) => {
         if (e.type === "lines") push(e.lines.map((l) => toLine(-1, l)));
         else if (e.type === "end") setStatus({ state: "ended" });
@@ -261,7 +290,19 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
       },
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab.context, tab.namespace, tab.pod, workload?.selector, container, tail, since, previous, timestamps, nonce, ready]);
+  }, [
+    tab.context,
+    tab.namespace,
+    tab.pod,
+    workload?.selector,
+    container,
+    tail,
+    since,
+    previous,
+    timestamps,
+    nonce,
+    ready,
+  ]);
 
   const srcList = srcRef.current.list;
   const podNames = useMemo(() => [...new Set(sources.map((s) => s.pod))].sort(), [sources]);
@@ -269,7 +310,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     () => (workload ? [...new Set(sources.map((s) => s.container))].sort() : podContainers.map((c) => c.name)),
     [workload, sources, podContainers],
   );
-  const showContainer = new Set(srcList.map((s) => s.container)).size > 1 || container === ALL && !workload;
+  const showContainer = new Set(srcList.map((s) => s.container)).size > 1 || (container === ALL && !workload);
   const prefix = (l: Line) => {
     if (l.src < 0) return "";
     const s = srcList[l.src];
@@ -282,7 +323,10 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   const { test, searchError } = useMemo(() => {
     if (!search) return { test: null, searchError: null };
     try {
-      return { test: new RegExp(regex ? search : search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"), searchError: null };
+      return {
+        test: new RegExp(regex ? search : search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"),
+        searchError: null,
+      };
     } catch (e) {
       return { test: null, searchError: (e as Error).message };
     }
@@ -293,7 +337,8 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     const buf = linesRef.current;
     const t = filterMode ? test : null;
     if (!podFilter && !t) return buf;
-    const keep = (l: Line) => (!podFilter || (l.src >= 0 && srcList[l.src].pod === podFilter)) && (!t || t.test(l.text));
+    const keep = (l: Line) =>
+      (!podFilter || (l.src >= 0 && srcList[l.src].pod === podFilter)) && (!t || t.test(l.text));
     let f = filterRef.current;
     if (!f || f.buf !== buf || f.pod !== podFilter || f.test !== t) {
       f = filterRef.current = { buf, pod: podFilter, test: t, lines: [], next: 0 };
@@ -312,7 +357,9 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   const scrollRef = useRef<HTMLDivElement>(null);
   const [scroll, setScroll] = useState({ top: 0, height: 600 });
   const readScroll = (el: HTMLElement) =>
-    setScroll((s) => (s.top === el.scrollTop && s.height === el.clientHeight ? s : { top: el.scrollTop, height: el.clientHeight }));
+    setScroll((s) =>
+      s.top === el.scrollTop && s.height === el.clientHeight ? s : { top: el.scrollTop, height: el.clientHeight },
+    );
   const atBottom = useRef(true);
   // Set while scrolled away from the bottom: how many lines had arrived at that point.
   const [awayAt, setAwayAt] = useState<number | null>(null);
@@ -374,7 +421,8 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     if (!test || filterMode) return null;
     let m = matchRef.current;
     if (!m || m.src !== shown || m.test !== test) m = matchRef.current = { src: shown, test, ns: [], next: 0 };
-    for (let i = lowerBound(shown, m.next, lineN); i < shown.length; i++) if (test.test(shown[i].text)) m.ns.push(shown[i].n);
+    for (let i = lowerBound(shown, m.next, lineN); i < shown.length; i++)
+      if (test.test(shown[i].text)) m.ns.push(shown[i].n);
     if (shown.length) {
       m.next = shown[shown.length - 1].n + 1;
       const drop = lowerBound(m.ns, shown[0].n, num);
@@ -383,7 +431,8 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     return m.ns;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, shown, test, filterMode]);
-  const matchOffset = matchNs && shown.length ? lowerBound(matchNs, shown[Math.min(wrapOffset, shown.length - 1)].n, num) : 0;
+  const matchOffset =
+    matchNs && shown.length ? lowerBound(matchNs, shown[Math.min(wrapOffset, shown.length - 1)].n, num) : 0;
   const matchCount = !test ? 0 : matchNs ? matchNs.length - matchOffset : shown.length - wrapOffset;
   /** Index into `shown` of the k-th match. */
   const matchAt = (k: number) => (matchNs ? lowerBound(shown, matchNs[matchOffset + k], lineN) : wrapOffset + k);
@@ -404,23 +453,41 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
   };
   const streaming = sources.filter((s) => s.state === "streaming").length;
   // Re-measure when toolbar contents change; the ResizeObserver covers the toolbar's own size.
-  useLayoutEffect(fitToolbar, [podNames.length, containerNames.length, multi, workload, container, tail, since, search, searchError, matchCount, curLine]); // eslint-disable-line react-hooks/exhaustive-deps
+  useLayoutEffect(fitToolbar, [
+    podNames.length,
+    containerNames.length,
+    multi,
+    workload,
+    container,
+    tail,
+    since,
+    search,
+    searchError,
+    matchCount,
+    curLine,
+  ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Shown inline when the toolbar is wide, inside the ⋯ menu when narrow.
   const toggles = (
     <>
       {!multi && (
-        <Checkbox checked={previous} onChange={(e) => setPrevious(e.target.checked)}>Previous</Checkbox>
+        <Checkbox checked={previous} onChange={(e) => setPrevious(e.target.checked)}>
+          {S.logs.previous}
+        </Checkbox>
       )}
-      <Checkbox checked={wrap} onChange={(e) => setWrap(e.target.checked)}>Wrap</Checkbox>
-      <Checkbox checked={follow} onChange={(e) => setFollow(e.target.checked)}>Follow</Checkbox>
+      <Checkbox checked={wrap} onChange={(e) => setWrap(e.target.checked)}>
+        {S.logs.wrap}
+      </Checkbox>
+      <Checkbox checked={follow} onChange={(e) => setFollow(e.target.checked)}>
+        {S.logs.follow}
+      </Checkbox>
     </>
   );
   const actions: [string, () => void, boolean?][] = [
-    ["Reconnect", () => setNonce((n) => n + 1)],
-    ["Save", download],
+    [S.terminal.reconnect, () => setNonce((n) => n + 1)],
+    [S.logs.save, download],
     [
-      "Clear",
+      S.logs.clear,
       () => {
         linesRef.current = [];
         setVersion((v) => v + 1);
@@ -433,8 +500,13 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
     <div className={`logs-view ${narrow ? "narrow" : ""}`}>
       <div className="toolbar" ref={toolbarRef}>
         {workload && podNames.length > 1 && (
-          <Select className="select" value={podFilter} onChange={(e) => setPodFilter(e.target.value)} title="Pod">
-            <option value="">All pods ({podNames.length})</option>
+          <Select
+            className="select"
+            value={podFilter}
+            onChange={(e) => setPodFilter(e.target.value)}
+            title={S.logs.pod}
+          >
+            <option value="">{S.logs.allPods(podNames.length)}</option>
             {podNames.map((p) => (
               <option key={p} value={p}>
                 {p}
@@ -447,9 +519,9 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
             className="select"
             value={container ?? ""}
             onChange={(e) => update(tab.id, { container: e.target.value })}
-            title="Container"
+            title={S.logs.container}
           >
-            {containerNames.length > 1 && <option value={ALL}>All containers</option>}
+            {containerNames.length > 1 && <option value={ALL}>{S.logs.allContainers}</option>}
             {workload
               ? containerNames.map((c) => (
                   <option key={c} value={c}>
@@ -459,19 +531,24 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
               : podContainers.map((c) => (
                   <option key={c.name} value={c.name}>
                     {c.name}
-                    {c.init ? " (init)" : ""}
+                    {c.init ? S.logs.init : ""}
                   </option>
                 ))}
           </Select>
         )}
-        <Select className="select" value={tail} onChange={(e) => setTail(Number(e.target.value))} title="Tail lines">
+        <Select className="select" value={tail} onChange={(e) => setTail(Number(e.target.value))} title={S.logs.tail}>
           {[100, 500, 1000, 5000, 20000, 0].map((n) => (
             <option key={n} value={n}>
-              {n ? `Last ${n}` : "All lines"}
+              {n ? S.logs.last(String(n)) : S.logs.allLines}
             </option>
           ))}
         </Select>
-        <Select className="select" value={since} onChange={(e) => setSince(Number(e.target.value))} title="Since">
+        <Select
+          className="select"
+          value={since}
+          onChange={(e) => setSince(Number(e.target.value))}
+          title={S.logs.since}
+        >
           {SINCE_OPTIONS.map(([v, label]) => (
             <option key={v} value={v}>
               {label}
@@ -480,7 +557,7 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
         </Select>
         <input
           className="input filter"
-          placeholder="Search"
+          placeholder={S.logs.search}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => {
@@ -491,33 +568,59 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
           }}
         />
         {searchError ? (
-          <span className="tone-bad small" title={searchError}>Invalid regex</span>
+          <span className="tone-bad small" title={searchError}>
+            {S.logs.invalidRegex}
+          </span>
         ) : (
           search && (
             <>
               <span className="muted small">
-                {curLine >= 0 ? `${cur! + 1} of ${matchCount}` : `${matchCount} matches`}
+                {curLine >= 0 ? S.logs.matchPosition(cur! + 1, matchCount) : S.logs.matches(matchCount)}
               </span>
-              <button className="btn btn-sm btn-icon" disabled={!matchCount} onClick={() => goToMatch(-1)} title="Previous match (Shift+Enter)">
+              <button
+                className="btn btn-sm btn-icon"
+                disabled={!matchCount}
+                onClick={() => goToMatch(-1)}
+                title={S.logs.prevMatch}
+              >
                 ↑
               </button>
-              <button className="btn btn-sm btn-icon" disabled={!matchCount} onClick={() => goToMatch(1)} title="Next match (Enter)">
+              <button
+                className="btn btn-sm btn-icon"
+                disabled={!matchCount}
+                onClick={() => goToMatch(1)}
+                title={S.logs.nextMatch}
+              >
                 ↓
               </button>
             </>
           )
         )}
         <div className="ns-picker" ref={moreRef}>
-          <button className="btn btn-sm btn-icon" title="More options" aria-haspopup="menu" aria-expanded={moreOpen} onClick={() => setMoreOpen(!moreOpen)}>
+          <button
+            className="btn btn-sm btn-icon"
+            title={S.logs.moreOptions}
+            aria-haspopup="menu"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen(!moreOpen)}
+          >
             ⋯
           </button>
           {moreOpen && (
             <div className="ns-popover logs-more" onKeyDown={(e) => e.key === "Escape" && setMoreOpen(false)}>
-              <Checkbox checked={regex} onChange={(e) => setRegex(e.target.checked)}>Regex</Checkbox>
-              <Checkbox checked={filterMode} onChange={(e) => setFilterMode(e.target.checked)}>Only matches</Checkbox>
-              <Checkbox checked={timestamps} onChange={(e) => setTimestamps(e.target.checked)}>Timestamps</Checkbox>
+              <Checkbox checked={regex} onChange={(e) => setRegex(e.target.checked)}>
+                {S.logs.regex}
+              </Checkbox>
+              <Checkbox checked={filterMode} onChange={(e) => setFilterMode(e.target.checked)}>
+                {S.logs.onlyMatches}
+              </Checkbox>
+              <Checkbox checked={timestamps} onChange={(e) => setTimestamps(e.target.checked)}>
+                {S.logs.timestamps}
+              </Checkbox>
               {workload && (
-                <Checkbox checked={showPod} onChange={(e) => setShowPod(e.target.checked)}>Pod name</Checkbox>
+                <Checkbox checked={showPod} onChange={(e) => setShowPod(e.target.checked)}>
+                  {S.logs.podName}
+                </Checkbox>
               )}
               <span className="logs-narrow">
                 {toggles}
@@ -549,90 +652,95 @@ export function LogsView({ tab, active, onUpdate }: { tab: LogsTab; active: bool
         </span>
       </div>
       <div className="logs-scroll">
-      <div
-        className="logs-body"
-        ref={scrollRef}
-        tabIndex={0}
-        onKeyDown={(e) => {
-          if (e.key === "End") {
-            e.preventDefault();
-            jumpToBottom();
-          } else if (e.key === "Home") {
-            e.preventDefault();
-            e.currentTarget.scrollTop = 0;
-          }
-        }}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < LINE_HEIGHT * 2;
-          atBottom.current = bottom;
-          if (bottom) setAwayAt(null);
-          else setAwayAt((a) => a ?? receivedRef.current);
-          readScroll(el);
-        }}
-      >
-        {wrap ? (
-          <div className="log-wrap">
-            {shown.length > WRAP_LIMIT && (
-              <div className="muted small log-note">
-                Wrap mode shows the newest {WRAP_LIMIT.toLocaleString()} of {shown.length.toLocaleString()} lines
-              </div>
-            )}
-            {shown.slice(wrapOffset).map((line, i) => (
-              <LogRow
-                key={line.n}
-                line={line}
-                prefix={prefix(line)}
-                color={srcList[line.src]?.color}
-                current={wrapOffset + i === curLine}
-                test={test}
+        <div
+          className="logs-body"
+          ref={scrollRef}
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key === "End") {
+              e.preventDefault();
+              jumpToBottom();
+            } else if (e.key === "Home") {
+              e.preventDefault();
+              e.currentTarget.scrollTop = 0;
+            }
+          }}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < LINE_HEIGHT * 2;
+            atBottom.current = bottom;
+            if (bottom) setAwayAt(null);
+            else setAwayAt((a) => a ?? receivedRef.current);
+            readScroll(el);
+          }}
+        >
+          {wrap ? (
+            <div className="log-wrap">
+              {shown.length > WRAP_LIMIT && (
+                <div className="muted small log-note">{S.logs.wrapNote(WRAP_LIMIT, shown.length)}</div>
+              )}
+              {shown.slice(wrapOffset).map((line, i) => (
+                <LogRow
+                  key={line.n}
+                  line={line}
+                  prefix={prefix(line)}
+                  color={srcList[line.src]?.color}
+                  current={wrapOffset + i === curLine}
+                  test={test}
+                />
+              ))}
+            </div>
+          ) : (
+            <div style={{ height: shown.length * LINE_HEIGHT, position: "relative", minWidth: "100%" }}>
+              {shown.slice(start, end).map((line, i) => (
+                <LogRow
+                  key={line.n}
+                  line={line}
+                  prefix={prefix(line)}
+                  color={srcList[line.src]?.color}
+                  current={start + i === curLine}
+                  test={test}
+                  top={(start + i) * LINE_HEIGHT}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+        {awayAt !== null && shown.length > 0 && (
+          <button className="logs-jump" onClick={jumpToBottom} title={S.logs.jumpHint}>
+            <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
+              <path
+                d="M7 2.5v8M3.5 7.5 7 11l3.5-3.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+                strokeLinejoin="round"
               />
-            ))}
-          </div>
-        ) : (
-          <div style={{ height: shown.length * LINE_HEIGHT, position: "relative", minWidth: "100%" }}>
-            {shown.slice(start, end).map((line, i) => (
-              <LogRow
-                key={line.n}
-                line={line}
-                prefix={prefix(line)}
-                color={srcList[line.src]?.color}
-                current={start + i === curLine}
-                test={test}
-                top={(start + i) * LINE_HEIGHT}
-              />
-            ))}
-          </div>
+            </svg>
+            {receivedRef.current - awayAt > 0 ? S.logs.newLines(receivedRef.current - awayAt) : S.logs.jumpToBottom}
+          </button>
         )}
       </div>
-      {awayAt !== null && shown.length > 0 && (
-        <button className="logs-jump" onClick={jumpToBottom} title="Jump to the latest line (End)">
-          <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden>
-            <path d="M7 2.5v8M3.5 7.5 7 11l3.5-3.5" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          {receivedRef.current - awayAt > 0
-            ? `${(receivedRef.current - awayAt).toLocaleString()} new line${receivedRef.current - awayAt === 1 ? "" : "s"}`
-            : "Jump to bottom"}
-        </button>
-      )}
-      </div>
       <div className="statusbar">
-        <span className={`dot tone-bg-${status.state === "streaming" ? "ok" : status.state === "error" ? "bad" : "muted"}`} />
-        {status.state === "connecting" && "Connecting…"}
+        <span
+          className={`dot tone-bg-${status.state === "streaming" ? "ok" : status.state === "error" ? "bad" : "muted"}`}
+        />
+        {status.state === "connecting" && S.clusterView.connecting}
         {status.state === "streaming" &&
           (multi
-            ? `Streaming ${streaming} of ${sources.length} container${sources.length === 1 ? "" : "s"}${workload ? ` across ${podNames.length} pod${podNames.length === 1 ? "" : "s"}` : ""}`
+            ? S.logs.streamingMulti(streaming, sources.length, workload ? podNames.length : null)
             : previous
-              ? "Previous container logs"
-              : "Streaming")}
-        {status.state === "ended" && "Stream ended"}
+              ? S.logs.previousLogs
+              : S.logs.streaming)}
+        {status.state === "ended" && S.logs.ended}
         {status.state === "error" && <span className="tone-bad">{status.message}</span>}
         {pod.error && <span className="tone-bad">{pod.error}</span>}
         {multi && status.state === "streaming" && sources.length === 0 && (
-          <span className="muted">— no running pods match</span>
+          <span className="muted">{S.logs.noPods}</span>
         )}
         <span className="spacer" />
-        <span className="muted">{linesRef.current.length.toLocaleString()} lines</span>
+        <span className="muted">{S.logs.lineCount(linesRef.current.length)}</span>
       </div>
     </div>
   );

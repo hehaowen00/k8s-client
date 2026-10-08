@@ -3,6 +3,7 @@ import { dock, tabTitle, type DockHost } from "../store";
 import { LogsView } from "../views/LogsView";
 import { TerminalView } from "../views/TerminalView";
 import { openContextMenu } from "./ContextMenu";
+import { S } from "../strings";
 
 const ICON = { logs: "≡", exec: "›_", terminal: "$" } as const;
 const BAR = 32;
@@ -18,7 +19,8 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
     const startY = e.clientY;
     const startH = d.height;
     const max = window.innerHeight - 160;
-    const move = (ev: MouseEvent) => dock.setHeight(host.id, Math.min(max, Math.max(120, startH + (startY - ev.clientY))));
+    const move = (ev: MouseEvent) =>
+      dock.setHeight(host.id, Math.min(max, Math.max(120, startH + (startY - ev.clientY))));
     const up = () => {
       window.removeEventListener("mousemove", move);
       window.removeEventListener("mouseup", up);
@@ -29,7 +31,7 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
 
   return (
     <div className="dock" style={{ height: open ? d.height : BAR }}>
-      {open && <div className="dock-resize" onMouseDown={startResize} title="Drag to resize" />}
+      {open && <div className="dock-resize" onMouseDown={startResize} title={S.common.dragToResize} />}
       <div className="dock-bar" onDoubleClick={(e) => e.target === e.currentTarget && dock.setOpen(host.id, !open)}>
         <div className="dock-tabs">
           {d.items.map((item) => (
@@ -41,11 +43,11 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
               onAuxClick={(e) => e.button === 1 && dock.close(host.id, item.id)}
               onContextMenu={(e) =>
                 openContextMenu(e, [
-                  { label: "Open in New Tab", onClick: () => dock.popOut(host.id, item.id) },
+                  { label: S.common.openInNewTab, onClick: () => dock.popOut(host.id, item.id) },
                   { separator: true, label: "" },
-                  { label: "Close", onClick: () => dock.close(host.id, item.id) },
-                  { label: "Close Others", onClick: () => dock.closeOthers(host.id, item.id) },
-                  { label: "Close All", onClick: () => dock.closeAll(host.id) },
+                  { label: S.common.close, onClick: () => dock.close(host.id, item.id) },
+                  { label: S.common.closeOthers, onClick: () => dock.closeOthers(host.id, item.id) },
+                  { label: S.common.closeAll, onClick: () => dock.closeAll(host.id) },
                 ])
               }
             >
@@ -53,7 +55,7 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
               <span className="tab-title">{tabTitle(item)}</span>
               <button
                 className="tab-close"
-                aria-label="Close"
+                aria-label={S.common.close}
                 onMouseDown={(e) => e.stopPropagation()}
                 onClick={() => dock.close(host.id, item.id)}
               >
@@ -64,14 +66,22 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
         </div>
         <div className="dock-actions">
           {d.activeId && (
-            <button className="btn btn-xs btn-ghost" title="Open in its own tab" onClick={() => dock.popOut(host.id, d.activeId!)}>
+            <button
+              className="btn btn-xs btn-ghost"
+              title={S.dock.popOut}
+              onClick={() => dock.popOut(host.id, d.activeId!)}
+            >
               ⧉
             </button>
           )}
-          <button className="btn btn-xs btn-ghost" title={`${open ? "Minimise" : "Restore"} (${shortcut("J")})`} onClick={() => dock.setOpen(host.id, !open)}>
+          <button
+            className="btn btn-xs btn-ghost"
+            title={S.dock.toggle(open, shortcut("J"))}
+            onClick={() => dock.setOpen(host.id, !open)}
+          >
             {open ? "▾" : "▴"}
           </button>
-          <button className="btn btn-xs btn-ghost" title="Close all" onClick={() => dock.closeAll(host.id)}>
+          <button className="btn btn-xs btn-ghost" title={S.common.closeAll} onClick={() => dock.closeAll(host.id)}>
             ✕
           </button>
         </div>
