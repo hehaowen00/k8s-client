@@ -14,6 +14,7 @@ import { TerminalView } from "./views/TerminalView";
 import { ApplyView } from "./views/ApplyView";
 import { PortForwardsView } from "./views/PortForwardsView";
 import { PortForwardDialogHost } from "./components/PortForwardDialog";
+import { RestartAcrossDialogHost } from "./components/RestartAcrossDialog";
 import { AddClusterDialogHost } from "./components/AddClusterDialog";
 import { Hotbar } from "./components/Hotbar";
 import { ClusterSettingsView, SettingsView } from "./views/SettingsView";
@@ -186,6 +187,7 @@ export default function App() {
       <ContextMenuHost />
       <DialogHost />
       <PortForwardDialogHost />
+      <RestartAcrossDialogHost />
       <AddClusterDialogHost />
       <CommandPaletteHost />
     </div>

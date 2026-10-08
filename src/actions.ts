@@ -2,6 +2,7 @@ import { api, canDelete, hasWorkloadLogs, isCronJob, isNode, isPod, isRestartabl
 import { selectorString } from "./util";
 import { confirmDialog, promptDialog, toast } from "./components/Dialogs";
 import { portForwardDialog, type PortChoice } from "./components/PortForwardDialog";
+import { restartAcrossDialog } from "./components/RestartAcrossDialog";
 import type { MenuItem } from "./components/ContextMenu";
 import { openSession, useTabs } from "./store";
 import { ALL_ALLOWED, type Perms } from "./permissions";
@@ -296,7 +297,10 @@ export function targetMenu(
   }
   if (isScalable(t.resource) || isRestartable(t.resource)) items.push({ separator: true, label: "" });
   if (isScalable(t.resource)) items.push({ label: "Scale", disabled: !p.patch, onClick: () => scaleTarget(t, extra?.replicas) });
-  if (isRestartable(t.resource)) items.push({ label: "Restart", disabled: !p.patch, onClick: () => restartTarget(t) });
+  if (isRestartable(t.resource)) {
+    items.push({ label: "Restart", disabled: !p.patch, onClick: () => restartTarget(t) });
+    items.push({ label: "Restart Across Clusters", onClick: () => restartAcrossDialog(t) });
+  }
   const extActions = useExtensions.getState().actions.filter((a) => matchesKind(a.kinds, t.resource));
   if (extActions.length) {
     items.push({ separator: true, label: "" });
