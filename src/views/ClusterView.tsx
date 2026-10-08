@@ -6,7 +6,7 @@ import { openDetail } from "../actions";
 import { forgetContext, loadDiscovery, refreshNamespaces, useDiscovery, useNamespaces, usePref } from "../hooks";
 import { useContexts } from "../settings";
 import { contextColor, openSession, openSingleton, pluralLabel, useTabs, type Tab, contextLabel, initialNamespace } from "../store";
-import { ALL_NAMESPACES, buildSections, isPlaceholder, nsForApi, nsSelection, sameResource } from "../util";
+import { ALL_NAMESPACES, buildSections, isPlaceholder, nsForApi, nsSelection, pollWhileVisible, sameResource } from "../util";
 import { ResourceTable } from "./ResourceTable";
 import { DetailView } from "./DetailView";
 import { OverviewView } from "./OverviewView";
@@ -85,16 +85,26 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
     else update(tab.id, { resource: null, page });
   };
 
-  const onCount = useCallback((shown: number, total: number) => setCounts({ shown, total }), []);
+  // The open table's own count is live, so the sidebar shows it instead of the periodic count.
+  const openKey = tab.resource ? `${tab.resource.group}/${tab.resource.kind}` : null;
+  const [liveCount, setLiveCount] = useState<{ key: string; total: number } | null>(null);
+  const onCount = useCallback(
+    (shown: number, total: number, loaded: boolean) => {
+      setCounts({ shown, total });
+      setLiveCount(loaded && openKey ? { key: openKey, total } : null);
+    },
+    [openKey],
+  );
 
-  // Object counts for the expanded sidebar sections (cheap limit=1 lists), refreshed every 30s.
+  // Object counts for the expanded sidebar sections (cheap limit=1 lists), refreshed every 10 minutes
+  // and whenever a section is expanded.
   const [kindCounts, setKindCounts] = useState<Record<string, number>>({});
-  useEffect(() => setKindCounts({}), [tab.context]);
+  const countNs = nsForApi(tab.namespace) ?? "";
+  useEffect(() => setKindCounts({}), [tab.context, countNs]);
   const expanded = useMemo(
     () => sections.filter((s) => !(!kindFilter && collapsed[s.title])).flatMap((s) => s.items.filter((r) => !isPlaceholder(r))),
     [sections, collapsed, kindFilter],
   );
-  const countNs = nsForApi(tab.namespace) ?? "";
   useEffect(() => {
     if (!active || !expanded.length) return;
     let cancelled = false;
@@ -107,15 +117,15 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
             const n = counts[i];
             if (n !== null && n !== undefined) next[`${r.group}/${r.kind}`] = n;
           });
-          setKindCounts(next);
+          setKindCounts((prev) => ({ ...prev, ...next }));
         },
         () => {},
       );
     load();
-    const t = setInterval(load, 30000);
+    const stop = pollWhileVisible(load, 10 * 60_000);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      stop();
     };
   }, [tab.context, expanded, countNs, active]);
 
@@ -127,6 +137,10 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
     namespaces.reload();
   };
 
+  const countOf = (r: ResourceInfo) => {
+    const key = `${r.group}/${r.kind}`;
+    return liveCount?.key === key ? liveCount.total : kindCounts[key];
+  };
   const resourceItem = (r: ResourceInfo) => (
     <button
       key={`${r.group}/${r.kind}`}
@@ -137,9 +151,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
       onAuxClick={(e) => e.button === 1 && pick(r, e)}
     >
       <span className="nav-label">{pluralLabel(r)}</span>
-      {kindCounts[`${r.group}/${r.kind}`] !== undefined && (
-        <span className="nav-count">{kindCounts[`${r.group}/${r.kind}`]}</span>
-      )}
+      {countOf(r) !== undefined && <span className="nav-count">{countOf(r)}</span>}
     </button>
   );
 

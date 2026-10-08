@@ -75,7 +75,7 @@ async fn resolve_service(client: &Client, ns: &str, svc: &str, port: u16) -> Res
         .ok_or_else(|| format!("service {svc} has no port {port}"))?;
     let labels = selector.iter().map(|(k, v)| format!("{k}={v}")).collect::<Vec<_>>().join(",");
     let pods = Api::<Pod>::namespaced(client.clone(), ns)
-        .list(&ListParams::default().labels(&labels))
+        .list(&ListParams::default().match_any().labels(&labels))
         .await
         .map_err(kerr)?;
     let pod = pods

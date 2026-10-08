@@ -1,7 +1,7 @@
 import { shortcut } from "../keys";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { restartAcrossDialog } from "../components/RestartAcrossDialog";
-import { api, hasWorkloadLogs, isCronJob, isNode, isPod, isRestartable, isScalable, type KubeObject, type ResourceInfo } from "../api";
+import { api, EVENT_RESOURCE, hasWorkloadLogs, isCronJob, isNode, isPod, isRestartable, isScalable, type KubeObject, type ResourceInfo } from "../api";
 import {
   deleteTarget,
   drainTarget,
@@ -15,7 +15,7 @@ import {
   setCordon,
   setSuspend,
   triggerCronJob, restartTarget, scaleTarget, type Target } from "../actions";
-import { useAsync, useDiscovery } from "../hooks";
+import { useDiscovery, useWatchObjects } from "../hooks";
 import { inBackground, useOpenObject } from "../clusterNav";
 import { openSession, useTabs, type Tab } from "../store";
 import { decodeBase64, formatAge, parseQuantity, selectorString, statusTone, useNow } from "../util";
@@ -66,36 +66,33 @@ export function DetailView(props: Props) {
   const [view, setView] = useState<View>(props.initialView ?? "overview");
   const target: Target = { context, resource, namespace, name };
   const [obj, setObj] = useState<KubeObject | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [gone, setGone] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
-  // Poll the object while visible so the overview stays live.
+  // Watch the object while visible so the overview stays live.
+  const watched = useWatchObjects(context, resource, namespace, { fieldSelector: `metadata.name=${name}` }, active);
   useEffect(() => {
-    if (!active) return;
+    setObj(null);
+    setGone(false);
+    setFetchError(null);
+    // Show the object straight away rather than waiting on the watch's first list.
     let cancelled = false;
-    const load = () =>
-      api.getObject(target).then(
-        (o) => {
-          if (cancelled) return;
-          setObj(o);
-          setError(null);
-          setGone(false);
-        },
-        (e) => {
-          if (cancelled) return;
-          const msg = String(e);
-          if (/not ?found/i.test(msg)) setGone(true);
-          setError(msg);
-        },
-      );
-    load();
-    const t = setInterval(load, 4000);
+    api.getObject({ context, resource, namespace, name }).then(
+      (o) => !cancelled && setObj((prev) => prev ?? o),
+      (e) => !cancelled && setFetchError(String(e)),
+    );
     return () => {
       cancelled = true;
-      clearInterval(t);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context, resource.plural, resource.group, namespace, name, active]);
+  }, [context, resource.plural, resource.group, namespace, name]);
+  useEffect(() => {
+    if (!watched.items) return;
+    const o = watched.items[0];
+    if (o) setObj(o);
+    setGone(!o);
+  }, [watched.items]);
+  const error = watched.error ?? (gone && !obj ? `${resource.kind} "${name}" not found` : fetchError);
 
   const changeView = (v: View) => {
     setView(v);
@@ -771,18 +768,28 @@ function YamlView({ target, perms }: { target: Target; perms: Perms }) {
   );
 }
 
+const eventTime = (e: KubeObject): string | undefined => e.lastTimestamp ?? e.eventTime ?? e.metadata?.creationTimestamp;
+
 function EventsView({ context, namespace, uid }: { context: string; namespace: string | null; uid?: string }) {
   const now = useNow(5000);
-  const { data, error, loading, reload } = useAsync(
-    () => (uid ? api.listEvents(context, namespace, uid) : Promise.resolve([])),
-    [context, namespace, uid],
+  const { items, error } = useWatchObjects(context, uid ? EVENT_RESOURCE : null, namespace, { fieldSelector: `involvedObject.uid=${uid}` });
+  const loading = items === null;
+  const data = useMemo(
+    () =>
+      items
+        ?.map((e) => ({
+          kind: e.type ?? "",
+          reason: e.reason ?? "",
+          message: e.message ?? "",
+          count: e.count ?? 1,
+          lastSeen: eventTime(e),
+          source: e.source?.component ?? e.reportingComponent ?? "",
+        }))
+        .sort((a, b) => String(b.lastSeen ?? "").localeCompare(String(a.lastSeen ?? ""))),
+    [items],
   );
-  useEffect(() => {
-    const t = setInterval(reload, 5000);
-    return () => clearInterval(t);
-  }, [reload]);
 
-  if (error) return <div className="error-box">{error}</div>;
+  if (error && !data) return <div className="error-box">{error}</div>;
   if (loading && !data) return <div className="empty">Loading…</div>;
   if (!data?.length) return <div className="empty">No events</div>;
   return (

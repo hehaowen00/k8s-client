@@ -7,11 +7,13 @@ mod mcp;
 mod metrics;
 mod multi_logs;
 mod nodeops;
+mod overview;
 mod portforward;
 mod settings;
 mod state;
 mod streams;
 mod updates;
+mod watch;
 
 /// The default macOS menu with a Settings item (Cmd+,) under the app menu.
 #[cfg(target_os = "macos")]
@@ -95,7 +97,7 @@ pub fn run() {
             kube_ops::list_namespaces,
             kube_ops::watch_resources,
             kube_ops::stop_stream,
-            kube_ops::list_owned,
+            kube_ops::watch_objects,
             kube_ops::list_objects,
             kube_ops::count_resources,
             kube_ops::can_i,
@@ -110,7 +112,7 @@ pub fn run() {
             metrics::node_metrics,
             metrics::prometheus_detect,
             metrics::prometheus_range,
-            metrics::cluster_overview,
+            overview::cluster_overview,
             helm::helm_list,
             helm::helm_release,
             helm::helm_install,
@@ -125,7 +127,6 @@ pub fn run() {
             nodeops::drain_node,
             nodeops::node_shell_create,
             nodeops::trigger_cronjob,
-            kube_ops::list_events,
             kube_ops::apply_manifest,
             streams::stream_logs,
             multi_logs::stream_multi_logs,

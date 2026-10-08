@@ -10,6 +10,8 @@ import { useSettings } from "../settings";
 import { Checkbox } from "../components/Checkbox";
 import { loadPerms } from "../permissions";
 
+const BACKGROUND_WATCH_MS = 5 * 60_000;
+
 const EMPTY_LIST: string[] = [];
 
 const ROW_HEIGHT = 30;
@@ -27,7 +29,8 @@ interface Props {
   reveal?: { name: string; namespace?: string } | null;
   onSelect: (row: Row | null) => void;
   onOpen: (row: Row, background: boolean) => void;
-  onCount: (n: number, total: number) => void;
+  /** `loaded`: the total is the server's actual count (listed without errors). */
+  onCount: (n: number, total: number, loaded: boolean) => void;
   /** Server-side filters (embedded "related pods" tables). */
   labelSelector?: string;
   fieldSelector?: string;
@@ -130,8 +133,17 @@ export function ResourceTable(props: Props) {
   const nsList: (string | null)[] = sel.none ? [] : sel.all ? (accessible.length ? accessible : [null]) : picked;
   const nsKey = nsList.join(",");
 
+  // Background tabs keep their watches for a while so switching back is instant, then let them go.
+  const [live, setLive] = useState(true);
+  useEffect(() => {
+    if (props.active) return setLive(true);
+    const t = setTimeout(() => setLive(false), BACKGROUND_WATCH_MS);
+    return () => clearTimeout(t);
+  }, [props.active]);
+
   // Subscribe to the live table stream(s); batch updates per animation frame.
   useEffect(() => {
+    if (!live) return;
     rowsRef.current = new Map();
     setColumns([]);
     setVersion((v) => v + 1);
@@ -193,10 +205,10 @@ export function ResourceTable(props: Props) {
       if (frame) cancelAnimationFrame(frame);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [context, resource.group, resource.version, resource.plural, nsKey, props.labelSelector, props.fieldSelector]);
+  }, [context, resource.group, resource.version, resource.plural, nsKey, props.labelSelector, props.fieldSelector, live]);
 
   const showNamespace = resource.namespaced && (sel.all || picked.length > 1);
-  const usage = useUsageMap(context, isPod(resource) ? "pods" : isNode(resource) ? "nodes" : null, picked.length === 1 ? picked[0] : null, props.active);
+  const usage = useUsageMap(context, isPod(resource) ? "pods" : isNode(resource) ? "nodes" : null, nsList.includes(null) ? null : (nsList as string[]), props.active);
   // Per-kind column layout: hidden columns and order, by label.
   const [layout, setLayout] = usePref<{ hidden: string[]; order: string[] }>(`columns.${resource.group}/${resource.kind}`, { hidden: [], order: [] });
   const allCols = useMemo(() => buildColumns(columns, showNamespace, wide, !!usage), [columns, showNamespace, wide, usage]);
@@ -247,7 +259,8 @@ export function ResourceTable(props: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [version, filter, sort, displayCols, usage]);
 
-  useEffect(() => onCount(visibleRows.rows.length, visibleRows.total), [visibleRows, onCount]);
+  const loaded = !status.loading && !status.error;
+  useEffect(() => onCount(visibleRows.rows.length, visibleRows.total, loaded), [visibleRows, onCount, loaded]);
 
   // Virtual scrolling
   const scrollRef = useRef<HTMLDivElement>(null);

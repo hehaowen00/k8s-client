@@ -27,7 +27,11 @@ export const ALL_ALLOWED: Perms = {
 };
 
 const cache = new Map<string, { at: number; p: Promise<Perms> }>();
-const TTL = 60_000;
+const TTL = 10 * 60_000;
+
+export function forgetPerms(context: string) {
+  for (const key of cache.keys()) if (key.startsWith(`${context}|`)) cache.delete(key);
+}
 
 export function loadPerms(context: string, r: ResourceInfo, namespace: string | null | undefined): Promise<Perms> {
   const ns = namespace ?? "";

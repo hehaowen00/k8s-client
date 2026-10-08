@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type ResourceInfo } from "./api";
+import { api, type KubeObject, type ResourceInfo } from "./api";
+import { forgetPerms } from "./permissions";
 
 const discoveryCache = new Map<string, Promise<ResourceInfo[]>>();
 
@@ -15,6 +16,7 @@ export function loadDiscovery(context: string, refresh = false): Promise<Resourc
 export function forgetContext(context: string) {
   discoveryCache.delete(context);
   namespaceCache.delete(context);
+  forgetPerms(context);
 }
 
 const sameDeps = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => Object.is(x, b[i]));
@@ -86,4 +88,43 @@ export function usePref<T>(key: string, initial: T): [T, (v: T) => void] {
     [key],
   );
   return [v, set];
+}
+
+/**
+ * Live objects from a watch. `items` is null until the first list arrives; on errors the last items are kept.
+ * Pass a null resource or `active = false` to stop watching.
+ */
+export function useWatchObjects(
+  context: string,
+  resource: ResourceInfo | null | undefined,
+  namespace: string | null,
+  selectors: { labelSelector?: string | null; fieldSelector?: string | null },
+  active = true,
+) {
+  const [state, setState] = useState<{ items: KubeObject[] | null; error: string | null }>({ items: null, error: null });
+  const { labelSelector, fieldSelector } = selectors;
+  useEffect(() => {
+    setState({ items: null, error: null });
+    if (!resource || !active) return;
+    const byUid = new Map<string, KubeObject>();
+    const uid = (o: KubeObject) => o.metadata?.uid ?? `${o.metadata?.namespace}/${o.metadata?.name}`;
+    const publish = () => setState({ items: [...byUid.values()], error: null });
+    return api.watchObjects(
+      context,
+      resource,
+      namespace,
+      (e) => {
+        if (e.type === "error") return setState((s) => ({ ...s, error: e.message }));
+        if (e.type === "reset") {
+          byUid.clear();
+          e.items.forEach((o) => byUid.set(uid(o), o));
+        } else if (e.type === "upsert") byUid.set(uid(e.object), e.object);
+        else byUid.delete(uid(e.object));
+        publish();
+      },
+      { labelSelector, fieldSelector },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [context, resource?.group, resource?.version, resource?.plural, namespace, labelSelector, fieldSelector, active]);
+  return state;
 }

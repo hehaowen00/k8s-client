@@ -505,7 +505,7 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                 if let Some(l) = arg(a, "labelSelector") {
                     url.push_str(&format!("labelSelector={}&", kube_ops::urlencode(l)));
                 }
-                let (cols, r, _, _) = kube_ops::list_table(&client, &url, &res).await?;
+                let (cols, r) = kube_ops::list_table(&client, &url, &res).await?;
                 columns = cols;
                 rows.extend(r);
             }
@@ -571,7 +571,7 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
             };
             check_segment("deployment", dep)?;
             let d = Api::<Deployment>::namespaced(client, ns).get(dep).await.map_err(kerr)?;
-            let mut list = pods.list(&ListParams::default().labels(&deployment_selector(&d)?)).await.map_err(kerr)?.items;
+            let mut list = pods.list(&ListParams::default().match_any().labels(&deployment_selector(&d)?)).await.map_err(kerr)?.items;
             list.sort_by(|x, y| x.metadata.name.cmp(&y.metadata.name));
             let total = list.len();
             let reads = list.iter().take(MAX_LOG_PODS).map(|p| {
@@ -604,7 +604,7 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
             let d = Api::<Deployment>::namespaced(client.clone(), ns).get(need_segment(a, "name")?).await.map_err(kerr)?;
             let mut out = deployment_summary(&d);
             if acc.resources.iter().any(|r| r == "pods") {
-                let list = Api::<Pod>::namespaced(client, ns).list(&ListParams::default().labels(&deployment_selector(&d)?)).await.map_err(kerr)?;
+                let list = Api::<Pod>::namespaced(client, ns).list(&ListParams::default().match_any().labels(&deployment_selector(&d)?)).await.map_err(kerr)?;
                 out["pods"] = list.items.iter().map(pod_summary).collect();
             }
             Ok((serde_json::to_string_pretty(&out).map_err(err)?, out["replicas"].to_string()))
@@ -616,7 +616,7 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                 return Err(Fail::Denied("events are not shared on this cluster".into()));
             }
             let client = state.client(cluster).await?;
-            let mut lp = ListParams::default();
+            let mut lp = ListParams::default().match_any();
             if let Some(n) = arg(a, "name") {
                 lp = lp.fields(&format!("involvedObject.name={n}"));
             }

@@ -1,7 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures::{AsyncBufReadExt, StreamExt};
 use kube::api::{
     Api, DeleteParams, DynamicObject, ListParams, Patch, PatchParams, PostParams,
 };
@@ -14,6 +13,7 @@ use tauri::ipc::Channel;
 use tauri::State;
 
 use crate::state::{err, kerr, AppState, Result};
+use crate::watch::{get_json, list_watch, Event as WatchEvent};
 
 const FIELD_MANAGER: &str = "kubetab";
 const TABLE_ACCEPT: &str = "application/json;as=Table;v=v1;g=meta.k8s.io,application/json;as=Table;v=v1beta1;g=meta.k8s.io,application/json";
@@ -57,6 +57,10 @@ impl ResourceInfo {
             }
             _ => format!("{base}/{}", self.plural),
         }
+    }
+
+    pub(crate) fn can_watch(&self) -> bool {
+        self.verbs.is_empty() || self.verbs.iter().any(|v| v == "watch")
     }
 
     pub(crate) fn api(&self, client: Client, namespace: Option<&str>) -> Api<DynamicObject> {
@@ -128,7 +132,7 @@ pub async fn list_namespaces(state: State<'_, AppState>, context: String) -> Res
     }
     let client = state.client(&context).await?;
     let api: Api<k8s_openapi::api::core::v1::Namespace> = Api::all(client);
-    let list = api.list(&ListParams::default()).await.map_err(kerr)?;
+    let list = api.list_metadata(&ListParams::default().match_any()).await.map_err(kerr)?;
     let mut names: Vec<String> = list
         .items
         .into_iter()
@@ -260,112 +264,41 @@ pub(crate) async fn list_table(
     client: &Client,
     url: &str,
     res: &ResourceInfo,
-) -> Result<(Vec<Column>, Vec<Row>, String, bool)> {
+) -> Result<(Vec<Column>, Vec<Row>)> {
     // `url` always ends in '?' or '&' (it may carry label/field selectors).
-    let req = http::Request::get(format!("{url}includeObject=Metadata"))
-        .header(http::header::ACCEPT, TABLE_ACCEPT)
-        .body(vec![])
-        .map_err(err)?;
-    let v: Value = client.request(req).await.map_err(kerr)?;
-    let rv = v["metadata"]["resourceVersion"]
-        .as_str()
-        .unwrap_or_default()
-        .to_string();
-    if is_table(&v) {
-        Ok((parse_columns(&v), parse_table_rows(&v), rv, true))
+    let v = get_json(client, &format!("{url}includeObject=Metadata&resourceVersion=0"), TABLE_ACCEPT).await?;
+    Ok(table_of(&v, res.namespaced))
+}
+
+fn table_of(v: &Value, namespaced: bool) -> (Vec<Column>, Vec<Row>) {
+    if is_table(v) {
+        (parse_columns(v), parse_table_rows(v))
     } else {
         let rows = v["items"]
             .as_array()
-            .map(|items| items.iter().map(|o| fallback_row(o, res.namespaced)).collect())
+            .map(|items| items.iter().map(|o| fallback_row(o, namespaced)).collect())
             .unwrap_or_default();
-        Ok((fallback_columns(res.namespaced), rows, rv, false))
+        (fallback_columns(namespaced), rows)
     }
 }
 
-const WATCH_BACKOFF_MIN: std::time::Duration = std::time::Duration::from_millis(500);
-const WATCH_BACKOFF_MAX: std::time::Duration = std::time::Duration::from_secs(30);
-
-enum WatchOutcome {
-    Cancelled,
-    /// Watch ended normally (server timeout); resume from resourceVersion.
-    Resume,
-    /// resourceVersion too old or stream error; relist. Carries an error worth showing (e.g. watch forbidden).
-    Relist(Option<String>),
+fn rows_of(obj: &Value, namespaced: bool) -> Vec<Row> {
+    if is_table(obj) {
+        parse_table_rows(obj)
+    } else {
+        vec![fallback_row(obj, namespaced)]
+    }
 }
 
-async fn watch_table(
-    client: &Client,
-    url: &str,
-    res: &ResourceInfo,
-    table_mode: bool,
-    rv: &mut String,
-    channel: &Channel<TableEvent>,
-    token: &tokio_util::sync::CancellationToken,
-) -> WatchOutcome {
-    let uri = format!(
-        "{url}watch=1&resourceVersion={rv}&includeObject=Metadata&timeoutSeconds=290"
-    );
-    let accept = if table_mode { TABLE_ACCEPT } else { "application/json" };
-    let req = match http::Request::get(uri)
-        .header(http::header::ACCEPT, accept)
-        .body(vec![])
-    {
-        Ok(r) => r,
-        Err(e) => return WatchOutcome::Relist(Some(e.to_string())),
-    };
-    let stream = tokio::select! {
-        _ = token.cancelled() => return WatchOutcome::Cancelled,
-        s = client.request_stream(req) => match s {
-            Ok(s) => s,
-            Err(kube::Error::Api(e)) if e.code == 410 => return WatchOutcome::Relist(None),
-            Err(e) => return WatchOutcome::Relist(Some(format!("watch failed: {}", kerr(e)))),
-        },
-    };
-    let mut lines = stream.lines();
-    loop {
-        let line = tokio::select! {
-            _ = token.cancelled() => return WatchOutcome::Cancelled,
-            l = lines.next() => l,
-        };
-        let line = match line {
-            None => return WatchOutcome::Resume,
-            Some(Err(_)) => return WatchOutcome::Relist(None),
-            Some(Ok(l)) => l,
-        };
-        let Ok(ev) = serde_json::from_str::<Value>(&line) else {
-            continue;
-        };
-        let obj = &ev["object"];
-        let ty = ev["type"].as_str().unwrap_or_default();
-        if ty == "ERROR" {
-            let msg = (obj["code"].as_i64() != Some(410)).then(|| format!("watch failed: {}", obj["message"].as_str().unwrap_or("unknown error")));
-            return WatchOutcome::Relist(msg);
-        }
-        let rows = if is_table(obj) {
-            parse_table_rows(obj)
-        } else {
-            vec![fallback_row(obj, res.namespaced)]
-        };
-        // Track the latest resourceVersion so we can resume.
-        let latest_rv = if is_table(obj) {
-            obj["rows"][0]["object"]["metadata"]["resourceVersion"].as_str()
-        } else {
-            obj["metadata"]["resourceVersion"].as_str()
-        };
-        if let Some(r) = latest_rv {
-            *rv = r.to_string();
-        }
-        let event = match ty {
-            "ADDED" | "MODIFIED" => TableEvent::Upsert { rows },
-            "DELETED" => TableEvent::Delete {
-                uids: rows.into_iter().map(|r| r.uid).collect(),
-            },
-            _ => continue,
-        };
-        if channel.send(event).is_err() {
-            return WatchOutcome::Cancelled;
-        }
+fn selector_url(resource: &ResourceInfo, namespace: Option<&str>, label_selector: Option<String>, field_selector: Option<String>) -> String {
+    let mut url = format!("{}?", resource.collection_url(namespace));
+    if let Some(l) = label_selector.filter(|s| !s.is_empty()) {
+        url.push_str(&format!("labelSelector={}&", urlencode(&l)));
     }
+    if let Some(f) = field_selector.filter(|s| !s.is_empty()) {
+        url.push_str(&format!("fieldSelector={}&", urlencode(&f)));
+    }
+    url
 }
 
 #[tauri::command]
@@ -380,67 +313,81 @@ pub async fn watch_resources(
 ) -> Result<String> {
     let client = state.client(&context).await?;
     let (id, token) = state.register_stream();
-    let mut url = format!("{}?", resource.collection_url(namespace.as_deref()));
-    if let Some(l) = label_selector.filter(|s| !s.is_empty()) {
-        url.push_str(&format!("labelSelector={}&", urlencode(&l)));
-    }
-    if let Some(f) = field_selector.filter(|s| !s.is_empty()) {
-        url.push_str(&format!("fieldSelector={}&", urlencode(&f)));
-    }
-
+    let url = selector_url(&resource, namespace.as_deref(), label_selector, field_selector) + "includeObject=Metadata&";
+    let (namespaced, can_watch) = (resource.namespaced, resource.can_watch());
     tokio::spawn(async move {
-        let mut backoff = 1u64;
-        let mut watch_backoff = WATCH_BACKOFF_MIN;
-        'outer: loop {
-            let (columns, rows, mut rv, table_mode) = match list_table(&client, &url, &resource).await {
-                Ok(v) => v,
-                Err(e) => {
-                    if channel.send(TableEvent::Error { message: e }).is_err() {
-                        break;
-                    }
-                    tokio::select! {
-                        _ = token.cancelled() => break,
-                        _ = tokio::time::sleep(std::time::Duration::from_secs(backoff)) => {}
-                    }
-                    backoff = (backoff * 2).min(30);
-                    continue;
+        list_watch(&client, &url, TABLE_ACCEPT, can_watch, &token, |ev| {
+            let event = match ev {
+                WatchEvent::Listed(v) => {
+                    let (columns, rows) = table_of(&v, namespaced);
+                    TableEvent::Reset { columns, rows }
                 }
+                WatchEvent::Upsert(o) => TableEvent::Upsert { rows: rows_of(&o, namespaced) },
+                WatchEvent::Delete(o) => TableEvent::Delete {
+                    uids: rows_of(&o, namespaced).into_iter().map(|r| r.uid).collect(),
+                },
+                WatchEvent::Error(message) => TableEvent::Error { message },
             };
-            backoff = 1;
-            if channel.send(TableEvent::Reset { columns, rows }).is_err() {
-                break;
-            }
-            loop {
-                let (started, start_rv) = (std::time::Instant::now(), rv.clone());
-                let outcome = watch_table(&client, &url, &resource, table_mode, &mut rv, &channel, &token).await;
-                // A watch that delivered events or ran a while is healthy; one that keeps ending at once backs off.
-                if rv != start_rv || started.elapsed() > std::time::Duration::from_secs(60) {
-                    watch_backoff = WATCH_BACKOFF_MIN;
-                }
-                let relist = match outcome {
-                    WatchOutcome::Cancelled => break 'outer,
-                    WatchOutcome::Resume => false,
-                    WatchOutcome::Relist(msg) => {
-                        if let Some(message) = msg {
-                            if channel.send(TableEvent::Error { message }).is_err() {
-                                break 'outer;
-                            }
-                        }
-                        true
+            channel.send(event).is_ok()
+        })
+        .await;
+    });
+    Ok(id)
+}
+
+#[derive(Serialize, Clone)]
+#[serde(tag = "type", rename_all = "camelCase")]
+pub enum ObjectEvent {
+    Reset { items: Vec<Value> },
+    Upsert { object: Value },
+    Delete { object: Value },
+    Error { message: String },
+}
+
+/// Live full objects (managedFields stripped); replaces polling for detail views.
+#[tauri::command]
+pub async fn watch_objects(
+    state: State<'_, AppState>,
+    context: String,
+    resource: ResourceInfo,
+    namespace: Option<String>,
+    label_selector: Option<String>,
+    field_selector: Option<String>,
+    channel: Channel<ObjectEvent>,
+) -> Result<String> {
+    let client = state.client(&context).await?;
+    let (id, token) = state.register_stream();
+    let url = selector_url(&resource, namespace.as_deref(), label_selector, field_selector);
+    let (ar, can_watch) = (resource.api_resource(), resource.can_watch());
+    tokio::spawn(async move {
+        list_watch(&client, &url, "application/json", can_watch, &token, |ev| {
+            let event = match ev {
+                WatchEvent::Listed(mut v) => {
+                    let mut items = match v["items"].take() {
+                        Value::Array(a) => a,
+                        _ => Vec::new(),
+                    };
+                    for o in &mut items {
+                        strip_noise(o);
+                        // List items come without apiVersion/kind.
+                        o["apiVersion"] = Value::String(ar.api_version.clone());
+                        o["kind"] = Value::String(ar.kind.clone());
                     }
-                };
-                if relist || watch_backoff > WATCH_BACKOFF_MIN || started.elapsed() < std::time::Duration::from_secs(1) {
-                    tokio::select! {
-                        _ = token.cancelled() => break 'outer,
-                        _ = tokio::time::sleep(watch_backoff) => {}
-                    }
-                    watch_backoff = (watch_backoff * 2).min(WATCH_BACKOFF_MAX);
+                    ObjectEvent::Reset { items }
                 }
-                if relist {
-                    continue 'outer;
+                WatchEvent::Upsert(mut object) => {
+                    strip_noise(&mut object);
+                    ObjectEvent::Upsert { object }
                 }
-            }
-        }
+                WatchEvent::Delete(mut object) => {
+                    strip_noise(&mut object);
+                    ObjectEvent::Delete { object }
+                }
+                WatchEvent::Error(message) => ObjectEvent::Error { message },
+            };
+            channel.send(event).is_ok()
+        })
+        .await;
     });
     Ok(id)
 }
@@ -464,7 +411,7 @@ pub async fn list_objects(
     label_selector: Option<String>,
 ) -> Result<Vec<Value>> {
     let client = state.client(&context).await?;
-    let mut lp = ListParams::default();
+    let mut lp = ListParams::default().match_any();
     if let Some(l) = label_selector.as_deref().filter(|s| !s.is_empty()) {
         lp = lp.labels(l);
     }
@@ -481,33 +428,6 @@ pub async fn list_objects(
             Ok(v)
         })
         .collect()
-}
-
-/// Objects of `resource` whose ownerReferences include `owner_uid` (e.g. a CronJob's Jobs).
-#[tauri::command]
-pub async fn list_owned(
-    state: State<'_, AppState>,
-    context: String,
-    resource: ResourceInfo,
-    namespace: Option<String>,
-    owner_uid: String,
-) -> Result<Vec<Value>> {
-    let client = state.client(&context).await?;
-    let list = resource
-        .api(client, namespace.as_deref())
-        .list(&ListParams::default())
-        .await
-        .map_err(kerr)?;
-    let mut out = Vec::new();
-    for o in list.items {
-        let owned = o.metadata.owner_references.iter().flatten().any(|r| r.uid == owner_uid);
-        if owned {
-            let mut v = serde_json::to_value(o).map_err(err)?;
-            strip_noise(&mut v);
-            out.push(v);
-        }
-    }
-    Ok(out)
 }
 
 #[tauri::command]
@@ -693,58 +613,6 @@ pub async fn restart_resource(
         .await
         .map_err(kerr)?;
     Ok(())
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct EventInfo {
-    kind: String,
-    reason: String,
-    message: String,
-    count: i64,
-    last_seen: Option<String>,
-    source: String,
-}
-
-#[tauri::command]
-pub async fn list_events(
-    state: State<'_, AppState>,
-    context: String,
-    namespace: Option<String>,
-    uid: String,
-) -> Result<Vec<EventInfo>> {
-    let client = state.client(&context).await?;
-    let api: Api<k8s_openapi::api::core::v1::Event> = match namespace.as_deref() {
-        Some(ns) if !ns.is_empty() => Api::namespaced(client, ns),
-        _ => Api::all(client),
-    };
-    let lp = ListParams::default().fields(&format!("involvedObject.uid={uid}"));
-    let list = api.list(&lp).await.map_err(kerr)?;
-    let mut out: Vec<EventInfo> = list
-        .items
-        .into_iter()
-        .map(|e| {
-            let last = e
-                .last_timestamp
-                .map(|t| t.0.to_string())
-                .or_else(|| e.event_time.map(|t| t.0.to_string()))
-                .or_else(|| e.metadata.creation_timestamp.map(|t| t.0.to_string()));
-            EventInfo {
-                kind: e.type_.unwrap_or_default(),
-                reason: e.reason.unwrap_or_default(),
-                message: e.message.unwrap_or_default(),
-                count: e.count.unwrap_or(1) as i64,
-                last_seen: last,
-                source: e
-                    .source
-                    .and_then(|s| s.component)
-                    .or(e.reporting_component)
-                    .unwrap_or_default(),
-            }
-        })
-        .collect();
-    out.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
-    Ok(out)
 }
 
 /// Server-side apply a (multi-document) manifest.

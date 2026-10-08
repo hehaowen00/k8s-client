@@ -1,12 +1,9 @@
 //! Resource metrics: live usage from metrics-server, history from Prometheus
-//! (auto-detected, queried through the API server's service proxy), and the
-//! aggregate numbers behind the cluster overview.
+//! (auto-detected, queried through the API server's service proxy).
 
 use std::collections::BTreeMap;
 
-use k8s_openapi::api::apps::v1::{DaemonSet, Deployment, StatefulSet};
-use k8s_openapi::api::batch::v1::Job;
-use k8s_openapi::api::core::v1::{Event, Node, Pod, Service};
+use k8s_openapi::api::core::v1::Service;
 use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 use kube::api::{Api, ListParams};
 use kube::Client;
@@ -53,7 +50,7 @@ pub fn parse_quantity(q: &str) -> f64 {
     n * mult
 }
 
-fn qty(map: &Option<BTreeMap<String, Quantity>>, key: &str) -> f64 {
+pub(crate) fn qty(map: &Option<BTreeMap<String, Quantity>>, key: &str) -> f64 {
     map.as_ref().and_then(|m| m.get(key)).map(|q| parse_quantity(&q.0)).unwrap_or(0.0)
 }
 
@@ -87,68 +84,80 @@ fn usage_of(v: &Value) -> (f64, f64) {
     )
 }
 
-/// Current pod usage from metrics-server. `namespace` None = all; `selector` narrows to a workload.
+fn pod_usage(item: &Value) -> Usage {
+    let containers: Vec<ContainerUsage> = item["containers"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|c| {
+            let (cpu, memory) = usage_of(&c["usage"]);
+            ContainerUsage { name: c["name"].as_str().unwrap_or_default().into(), cpu, memory }
+        })
+        .collect();
+    Usage {
+        namespace: item["metadata"]["namespace"].as_str().map(String::from),
+        name: item["metadata"]["name"].as_str().unwrap_or_default().into(),
+        cpu: containers.iter().map(|c| c.cpu).sum(),
+        memory: containers.iter().map(|c| c.memory).sum(),
+        containers,
+    }
+}
+
+fn node_usage(item: &Value) -> Usage {
+    let (cpu, memory) = usage_of(&item["usage"]);
+    Usage {
+        namespace: None,
+        name: item["metadata"]["name"].as_str().unwrap_or_default().into(),
+        cpu,
+        memory,
+        containers: vec![],
+    }
+}
+
+/// A list, or one object when `name` is set (empty if metrics-server has nothing for it yet).
+async fn usage_list(client: &Client, path: &str, name: bool, parse: fn(&Value) -> Usage) -> Result<Vec<Usage>> {
+    let req = http::Request::get(path).body(vec![]).map_err(err)?;
+    match client.request::<Value>(req).await {
+        Ok(v) if name => Ok(vec![parse(&v)]),
+        Ok(v) => Ok(v["items"].as_array().into_iter().flatten().map(parse).collect()),
+        Err(kube::Error::Api(e)) if name && e.code == 404 => Ok(vec![]),
+        Err(e) => Err(kerr(e)),
+    }
+}
+
+/// Current pod usage from metrics-server. `namespace` None = all; `selector` narrows to a workload;
+/// `name` fetches just that pod.
 #[tauri::command]
 pub async fn pod_metrics(
     state: State<'_, AppState>,
     context: String,
     namespace: Option<String>,
     selector: Option<String>,
+    name: Option<String>,
 ) -> Result<Vec<Usage>> {
     let client = state.client(&context).await?;
-    let mut path = match namespace.as_deref().filter(|n| !n.is_empty()) {
-        Some(ns) => format!("/apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods"),
-        None => "/apis/metrics.k8s.io/v1beta1/pods".into(),
+    let ns = namespace.filter(|n| !n.is_empty());
+    let name = name.filter(|n| !n.is_empty());
+    let mut path = match (&ns, &name) {
+        (Some(ns), Some(name)) => format!("/apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods/{name}"),
+        (Some(ns), None) => format!("/apis/metrics.k8s.io/v1beta1/namespaces/{ns}/pods"),
+        (None, _) => "/apis/metrics.k8s.io/v1beta1/pods".into(),
     };
-    if let Some(sel) = selector.filter(|s| !s.is_empty()) {
+    let single = ns.is_some() && name.is_some();
+    if let Some(sel) = selector.filter(|s| !s.is_empty() && !single) {
         path.push_str("?labelSelector=");
         path.push_str(&urlencode(&sel));
     }
-    let v = raw_json(&client, &path).await?;
-    Ok(v["items"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|item| {
-            let containers: Vec<ContainerUsage> = item["containers"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .map(|c| {
-                    let (cpu, memory) = usage_of(&c["usage"]);
-                    ContainerUsage { name: c["name"].as_str().unwrap_or_default().into(), cpu, memory }
-                })
-                .collect();
-            Usage {
-                namespace: item["metadata"]["namespace"].as_str().map(String::from),
-                name: item["metadata"]["name"].as_str().unwrap_or_default().into(),
-                cpu: containers.iter().map(|c| c.cpu).sum(),
-                memory: containers.iter().map(|c| c.memory).sum(),
-                containers,
-            }
-        })
-        .collect())
+    usage_list(&client, &path, single, pod_usage).await
 }
 
 #[tauri::command]
-pub async fn node_metrics(state: State<'_, AppState>, context: String) -> Result<Vec<Usage>> {
+pub async fn node_metrics(state: State<'_, AppState>, context: String, name: Option<String>) -> Result<Vec<Usage>> {
     let client = state.client(&context).await?;
-    let v = raw_json(&client, "/apis/metrics.k8s.io/v1beta1/nodes").await?;
-    Ok(v["items"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .map(|item| {
-            let (cpu, memory) = usage_of(&item["usage"]);
-            Usage {
-                namespace: None,
-                name: item["metadata"]["name"].as_str().unwrap_or_default().into(),
-                cpu,
-                memory,
-                containers: vec![],
-            }
-        })
-        .collect())
+    match name.filter(|n| !n.is_empty()) {
+        Some(n) => usage_list(&client, &format!("/apis/metrics.k8s.io/v1beta1/nodes/{n}"), true, node_usage).await,
+        None => usage_list(&client, "/apis/metrics.k8s.io/v1beta1/nodes", false, node_usage).await,
+    }
 }
 
 fn urlencode(s: &str) -> String {
@@ -206,7 +215,7 @@ async fn detect_prometheus(client: &Client) -> Option<PrometheusTarget> {
         }
     }
     // Otherwise any service that looks like Prometheus.
-    let services = Api::<Service>::all(client.clone()).list(&ListParams::default()).await.ok()?;
+    let services = Api::<Service>::all(client.clone()).list(&ListParams::default().match_any()).await.ok()?;
     for s in services.items {
         let name = s.metadata.name.clone().unwrap_or_default();
         let labels = s.metadata.labels.clone().unwrap_or_default();
@@ -285,246 +294,6 @@ pub async fn prometheus_range(
         out.push(points);
     }
     Ok(out)
-}
-
-// ---------------------------------------------------------------------------
-// Cluster overview
-// ---------------------------------------------------------------------------
-
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct NodeSummary {
-    name: String,
-    ready: bool,
-    unschedulable: bool,
-    roles: Vec<String>,
-    cpu_allocatable: f64,
-    memory_allocatable: f64,
-    pods_allocatable: f64,
-    kubelet_version: String,
-}
-
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct WorkloadCount {
-    kind: String,
-    total: usize,
-    healthy: usize,
-    progressing: usize,
-    failed: usize,
-}
-
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct WarningEvent {
-    namespace: String,
-    object: String,
-    reason: String,
-    message: String,
-    count: i64,
-    last_seen: Option<String>,
-}
-
-#[derive(Serialize, Default)]
-#[serde(rename_all = "camelCase")]
-pub struct Overview {
-    server_version: String,
-    nodes: Vec<NodeSummary>,
-    pod_phases: BTreeMap<String, usize>,
-    pods_total: usize,
-    cpu_requests: f64,
-    memory_requests: f64,
-    cpu_limits: f64,
-    memory_limits: f64,
-    workloads: Vec<WorkloadCount>,
-    warnings: Vec<WarningEvent>,
-    namespaces: Option<usize>,
-}
-
-fn is_ready(conds: &Option<Vec<k8s_openapi::api::core::v1::NodeCondition>>) -> bool {
-    conds.iter().flatten().any(|c| c.type_ == "Ready" && c.status == "True")
-}
-
-/// Aggregates for the cluster overview. `namespace` scopes pods/workloads/events; nodes are always cluster-wide.
-#[tauri::command]
-pub async fn cluster_overview(
-    state: State<'_, AppState>,
-    context: String,
-    namespace: Option<String>,
-) -> Result<Overview> {
-    let client = state.client(&context).await?;
-    let ns = namespace.filter(|n| !n.is_empty());
-    macro_rules! api {
-        ($t:ty) => {
-            match &ns {
-                Some(n) => Api::<$t>::namespaced(client.clone(), n),
-                None => Api::<$t>::all(client.clone()),
-            }
-        };
-    }
-    let lp = ListParams::default();
-    let warn_lp = ListParams::default().fields("type=Warning");
-    let (node_api, pod_api, dep_api, sts_api, ds_api, job_api, ev_api) = (
-        Api::<Node>::all(client.clone()),
-        api!(Pod),
-        api!(Deployment),
-        api!(StatefulSet),
-        api!(DaemonSet),
-        api!(Job),
-        api!(Event),
-    );
-    let (nodes, pods, deps, sts, dss, jobs, events, version) = tokio::join!(
-        node_api.list(&lp),
-        pod_api.list(&lp),
-        dep_api.list(&lp),
-        sts_api.list(&lp),
-        ds_api.list(&lp),
-        job_api.list(&lp),
-        ev_api.list(&warn_lp),
-        client.apiserver_version(),
-    );
-    let mut o = Overview {
-        server_version: version.map(|v| v.git_version).unwrap_or_default(),
-        ..Default::default()
-    };
-    // Nodes may be forbidden for namespace-scoped users; the rest still works.
-    if let Ok(nodes) = nodes {
-        for n in nodes.items {
-            let status = n.status.unwrap_or_default();
-            let labels = n.metadata.labels.unwrap_or_default();
-            let mut roles: Vec<String> = labels
-                .keys()
-                .filter_map(|k| k.strip_prefix("node-role.kubernetes.io/").map(String::from))
-                .collect();
-            roles.sort();
-            o.nodes.push(NodeSummary {
-                name: n.metadata.name.unwrap_or_default(),
-                ready: is_ready(&status.conditions),
-                unschedulable: n.spec.and_then(|s| s.unschedulable).unwrap_or(false),
-                roles,
-                cpu_allocatable: qty(&status.allocatable, "cpu"),
-                memory_allocatable: qty(&status.allocatable, "memory"),
-                pods_allocatable: qty(&status.allocatable, "pods"),
-                kubelet_version: status.node_info.map(|i| i.kubelet_version).unwrap_or_default(),
-            });
-        }
-    }
-    let pods = pods.map_err(kerr)?;
-    o.pods_total = pods.items.len();
-    for p in &pods.items {
-        let phase = p.status.as_ref().and_then(|s| s.phase.clone()).unwrap_or_else(|| "Unknown".into());
-        let running = phase == "Running" || phase == "Pending";
-        *o.pod_phases.entry(phase).or_default() += 1;
-        // Requests/limits only count pods that hold resources.
-        if running {
-            for c in p.spec.iter().flat_map(|s| s.containers.iter()) {
-                if let Some(r) = &c.resources {
-                    o.cpu_requests += qty(&r.requests, "cpu");
-                    o.memory_requests += qty(&r.requests, "memory");
-                    o.cpu_limits += qty(&r.limits, "cpu");
-                    o.memory_limits += qty(&r.limits, "memory");
-                }
-            }
-        }
-    }
-    if let Ok(d) = deps {
-        let mut w = WorkloadCount { kind: "Deployment".into(), ..Default::default() };
-        for x in d.items {
-            let want = x.spec.and_then(|s| s.replicas).unwrap_or(1);
-            let st = x.status.unwrap_or_default();
-            let ready = st.ready_replicas.unwrap_or(0);
-            w.total += 1;
-            if ready >= want {
-                w.healthy += 1;
-            } else if st.unavailable_replicas.unwrap_or(0) > 0 && ready == 0 && want > 0 {
-                w.failed += 1;
-            } else {
-                w.progressing += 1;
-            }
-        }
-        o.workloads.push(w);
-    }
-    if let Ok(s) = sts {
-        let mut w = WorkloadCount { kind: "StatefulSet".into(), ..Default::default() };
-        for x in s.items {
-            let want = x.spec.and_then(|s| s.replicas).unwrap_or(1);
-            let ready = x.status.and_then(|s| s.ready_replicas).unwrap_or(0);
-            w.total += 1;
-            if ready >= want { w.healthy += 1 } else { w.progressing += 1 }
-        }
-        o.workloads.push(w);
-    }
-    if let Ok(d) = dss {
-        let mut w = WorkloadCount { kind: "DaemonSet".into(), ..Default::default() };
-        for x in d.items {
-            let st = x.status.unwrap_or_default();
-            w.total += 1;
-            if st.number_ready >= st.desired_number_scheduled { w.healthy += 1 } else { w.progressing += 1 }
-        }
-        o.workloads.push(w);
-    }
-    if let Ok(j) = jobs {
-        let mut w = WorkloadCount { kind: "Job".into(), ..Default::default() };
-        for x in j.items {
-            let st = x.status.unwrap_or_default();
-            w.total += 1;
-            if st.failed.unwrap_or(0) > 0 && st.succeeded.unwrap_or(0) == 0 && st.active.unwrap_or(0) == 0 {
-                w.failed += 1;
-            } else if st.active.unwrap_or(0) > 0 {
-                w.progressing += 1;
-            } else {
-                w.healthy += 1;
-            }
-        }
-        o.workloads.push(w);
-    }
-    {
-        let mut w = WorkloadCount { kind: "Pod".into(), total: pods.items.len(), ..Default::default() };
-        for (phase, n) in &o.pod_phases {
-            match phase.as_str() {
-                "Running" | "Succeeded" => w.healthy += n,
-                "Pending" => w.progressing += n,
-                _ => w.failed += n,
-            }
-        }
-        o.workloads.insert(0, w);
-    }
-    if let Ok(ev) = events {
-        let mut items: Vec<WarningEvent> = ev
-            .items
-            .into_iter()
-            .map(|e| {
-                let last = e
-                    .last_timestamp
-                    .map(|t| t.0.to_string())
-                    .or_else(|| e.event_time.map(|t| t.0.to_string()))
-                    .or_else(|| e.metadata.creation_timestamp.map(|t| t.0.to_string()));
-                WarningEvent {
-                    namespace: e.metadata.namespace.unwrap_or_default(),
-                    object: format!(
-                        "{}/{}",
-                        e.involved_object.kind.unwrap_or_default().to_lowercase(),
-                        e.involved_object.name.unwrap_or_default()
-                    ),
-                    reason: e.reason.unwrap_or_default(),
-                    message: e.message.unwrap_or_default(),
-                    count: e.count.unwrap_or(1) as i64,
-                    last_seen: last,
-                }
-            })
-            .collect();
-        items.sort_by(|a, b| b.last_seen.cmp(&a.last_seen));
-        items.truncate(50);
-        o.warnings = items;
-    }
-    if ns.is_none() {
-        o.namespaces = Api::<k8s_openapi::api::core::v1::Namespace>::all(client)
-            .list_metadata(&ListParams::default())
-            .await
-            .ok()
-            .map(|l| l.items.len());
-    }
-    Ok(o)
 }
 
 #[cfg(test)]

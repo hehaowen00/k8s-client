@@ -1,21 +1,24 @@
 //! Log streaming across many pods/containers: a whole workload (label selector)
-//! or every container of one pod. Pods are re-listed periodically so new pods
-//! (rollouts, scale-ups) join the stream and restarted containers reconnect.
+//! or every container of one pod. Pods are watched so new pods (rollouts,
+//! scale-ups) join the stream and restarted containers reconnect.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::time::Duration;
 
 use futures::{AsyncBufReadExt, StreamExt};
 use k8s_openapi::api::core::v1::Pod;
 use k8s_openapi::jiff::Timestamp;
-use kube::api::{Api, ListParams, LogParams};
+use kube::api::{Api, LogParams};
 use serde::Serialize;
+use serde_json::Value;
 use tauri::ipc::Channel;
 use tauri::State;
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-use crate::state::{kerr, AppState, Result};
+use crate::kube_ops::urlencode;
+use crate::state::{AppState, Result};
+use crate::watch::{list_watch, Event};
 
 const RECONCILE_EVERY: Duration = Duration::from_secs(3);
 const FLUSH_EVERY: Duration = Duration::from_millis(80);
@@ -105,7 +108,12 @@ pub async fn stream_multi_logs(
     }
     let client = state.client(&context).await?;
     let (id, token) = state.register_stream();
-    let api: Api<Pod> = Api::namespaced(client, &namespace);
+    let api: Api<Pod> = Api::namespaced(client.clone(), &namespace);
+    let url = match (&selector, &pod) {
+        (Some(sel), _) => format!("/api/v1/namespaces/{namespace}/pods?labelSelector={}&", urlencode(sel)),
+        (None, Some(name)) => format!("/api/v1/namespaces/{namespace}/pods?fieldSelector={}&", urlencode(&format!("metadata.name={name}"))),
+        (None, None) => unreachable!(),
+    };
     let timestamps = timestamps.unwrap_or(false);
 
     tokio::spawn(async move {
@@ -121,26 +129,39 @@ pub async fn stream_multi_logs(
         let mut buf: Vec<TaggedLine> = Vec::new();
         let mut reconcile = tokio::time::interval(RECONCILE_EVERY);
         let mut flush = tokio::time::interval(FLUSH_EVERY);
+        let mut pods: BTreeMap<String, Pod> = BTreeMap::new();
+        // Reconcile only after the pod set changed or a stream ended.
+        let mut dirty = false;
+        let (wtx, mut wrx) = mpsc::unbounded_channel::<Event>();
+        let wtoken = token.clone();
+        tokio::spawn(async move { list_watch(&client, &url, "application/json", true, &wtoken, |e| wtx.send(e).is_ok()).await });
 
         'main: loop {
             tokio::select! {
                 _ = token.cancelled() => break,
-                _ = reconcile.tick() => {
-                    let pods: std::result::Result<Vec<Pod>, kube::Error> = match (&selector, &pod) {
-                        (Some(sel), _) => api.list(&ListParams::default().labels(sel)).await.map(|l| l.items),
-                        (None, Some(name)) => match api.get_opt(name).await {
-                            Ok(p) => Ok(p.into_iter().collect()),
-                            Err(e) => Err(e),
-                        },
-                        (None, None) => unreachable!(),
-                    };
-                    let pods = match pods {
-                        Ok(p) => {
+                Some(ev) = wrx.recv() => {
+                    let parse = |v: Value| serde_json::from_value::<Pod>(v).ok();
+                    match ev {
+                        Event::Listed(mut v) => {
                             last_error = None;
-                            p
+                            pods.clear();
+                            if let Value::Array(items) = v["items"].take() {
+                                for p in items.into_iter().filter_map(parse) {
+                                    pods.insert(p.metadata.name.clone().unwrap_or_default(), p);
+                                }
+                            }
                         }
-                        Err(e) => {
-                            let msg = kerr(e);
+                        Event::Upsert(v) => {
+                            if let Some(p) = parse(v) {
+                                pods.insert(p.metadata.name.clone().unwrap_or_default(), p);
+                            }
+                        }
+                        Event::Delete(v) => {
+                            if let Some(name) = v["metadata"]["name"].as_str() {
+                                pods.remove(name);
+                            }
+                        }
+                        Event::Error(msg) => {
                             if last_error.as_ref() != Some(&msg) {
                                 if channel.send(MultiLogEvent::Error { message: msg.clone() }).is_err() {
                                     break 'main;
@@ -149,11 +170,14 @@ pub async fn stream_multi_logs(
                             }
                             continue;
                         }
-                    };
-
+                    }
+                    dirty = true;
+                }
+                _ = reconcile.tick(), if dirty => {
+                    dirty = false;
                     let mut present: HashSet<Key> = HashSet::new();
                     let mut sources = Vec::new();
-                    for p in &pods {
+                    for p in pods.values() {
                         let pod_name = p.metadata.name.clone().unwrap_or_default();
                         for (cname, cstate) in containers_of(p, container.as_deref()) {
                             let key = (pod_name.clone(), cname.clone());
@@ -220,6 +244,7 @@ pub async fn stream_multi_logs(
                         }
                     }
                     Msg::Ended(key) => {
+                        dirty = true;
                         active.remove(&key);
                         ended_at.insert(key, Timestamp::now());
                     }

@@ -1,23 +1,72 @@
 import { useEffect, useState } from "react";
 import { api, type PrometheusTarget, type Usage } from "./api";
+import { pollWhileVisible } from "./util";
 
 // ---------------------------------------------------------------------------
 // Live usage tables (metrics-server)
 // ---------------------------------------------------------------------------
 
-/** Poll metrics-server usage keyed by "namespace/name" (or "name" for nodes). null = unavailable. */
+/** metrics-server refreshes every 15–60s; polling faster only re-fetches the same numbers. */
+const METRICS_EVERY = 60_000;
+/** Views polling the same scope share one request within this window. */
+const USAGE_TTL = 30_000;
+const usageCache = new Map<string, { at: number; p: Promise<Usage[]> }>();
+
+function freshUsage(key: string): Promise<Usage[]> | undefined {
+  const hit = usageCache.get(key);
+  return hit && Date.now() - hit.at < USAGE_TTL ? hit.p : undefined;
+}
+
+function cachedUsage(key: string, fetch: () => Promise<Usage[]>): Promise<Usage[]> {
+  const hit = freshUsage(key);
+  if (hit) return hit;
+  const p = fetch();
+  p.catch(() => usageCache.delete(key));
+  usageCache.set(key, { at: Date.now(), p });
+  return p;
+}
+
+const podKey = (context: string, namespace: string | null, selector = "", name = "") => `${context}|pods|${namespace ?? ""}|${selector}|${name}`;
+
+export function podUsage(context: string, namespace: string | null, selector?: string | null): Promise<Usage[]> {
+  return cachedUsage(podKey(context, namespace, selector ?? ""), () => api.podMetrics(context, namespace, selector));
+}
+
+/** One pod's usage, reusing a fresh namespace-wide fetch when there is one. */
+function onePodUsage(context: string, namespace: string, pod: string): Promise<Usage | undefined> {
+  const wide = freshUsage(podKey(context, namespace)) ?? freshUsage(podKey(context, null));
+  if (wide) return wide.then((l) => l.find((u) => u.name === pod && (!u.namespace || u.namespace === namespace)));
+  return cachedUsage(podKey(context, namespace, "", pod), () => api.podMetrics(context, namespace, null, pod)).then((l) => l[0]);
+}
+
+export function nodeUsage(context: string): Promise<Usage[]> {
+  return cachedUsage(`${context}|nodes|`, () => api.nodeMetrics(context));
+}
+
+function oneNodeUsage(context: string, node: string): Promise<Usage | undefined> {
+  const wide = freshUsage(`${context}|nodes|`);
+  if (wide) return wide.then((l) => l.find((u) => u.name === node));
+  return cachedUsage(`${context}|nodes|${node}`, () => api.nodeMetrics(context, node)).then((l) => l[0]);
+}
+
+/**
+ * Poll metrics-server usage keyed by "namespace/name" (or "name" for nodes). null = unavailable.
+ * `namespaces` null = all namespaces; otherwise only those are fetched.
+ */
 export function useUsageMap(
   context: string,
   kind: "pods" | "nodes" | null,
-  namespace: string | null,
+  namespaces: string[] | null,
   active: boolean,
 ): Map<string, Usage> | null {
   const [map, setMap] = useState<Map<string, Usage> | null>(null);
+  const nsKey = namespaces?.join(",") ?? null;
   useEffect(() => {
     if (!kind || !active) return;
     let cancelled = false;
+    const scopes = nsKey === null ? [null] : nsKey ? nsKey.split(",") : [];
     const load = () =>
-      (kind === "pods" ? api.podMetrics(context, namespace) : api.nodeMetrics(context)).then(
+      (kind === "pods" ? Promise.all(scopes.map((ns) => podUsage(context, ns))).then((l) => l.flat()) : nodeUsage(context)).then(
         (list) => {
           if (cancelled) return;
           setMap(new Map(list.map((u) => [u.namespace ? `${u.namespace}/${u.name}` : u.name, u])));
@@ -25,12 +74,12 @@ export function useUsageMap(
         () => !cancelled && setMap(null),
       );
     load();
-    const t = setInterval(load, 15000);
+    const stop = pollWhileVisible(load, METRICS_EVERY);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      stop();
     };
-  }, [context, kind, namespace, active]);
+  }, [context, kind, nsKey, active]);
   return map;
 }
 
@@ -74,7 +123,7 @@ export function detectPrometheus(context: string, refresh = false) {
 
 /** Samples collected while the app is open, so fallback charts survive tab switches. */
 const samples = new Map<string, { cpu: Point[]; memory: Point[] }>();
-const SAMPLE_EVERY = 10_000;
+const SAMPLE_EVERY = METRICS_EVERY;
 const KEEP_SECONDS = SPANS[SPANS.length - 1].seconds;
 
 export interface MetricSpec {
@@ -103,23 +152,31 @@ export function useMetricSeries(context: string, spec: MetricSpec | null, active
   useEffect(() => {
     if (!spec || !active) return;
     let cancelled = false;
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let stop: (() => void) | undefined;
     (async () => {
       const prom = await detectPrometheus(context);
       if (cancelled) return;
       if (prom) {
         const step = Math.max(5, span / MAX_BARS);
+        // After the first load only points since the last one are fetched (the last is re-fetched
+        // since it may have been incomplete), then the window is trimmed.
+        let have: { cpu: Point[]; memory: Point[]; end: number } | null = null;
         const load = async () => {
           const end = Math.floor(Date.now() / 1000 / step) * step;
+          const start = end - span + step;
+          const from = have && have.end >= start ? have.end : start;
+          const merge = (old: Point[] | undefined, add: Point[]) => [...(old ?? []).filter((p) => p[0] >= start && p[0] < from), ...add];
           try {
-            const [cpu, memory] = await api.prometheusRange(context, spec.prometheus, end - span + step, end, step);
-            if (!cancelled) setSeries({ cpu, memory, source: "prometheus", step, end });
+            const [cpu, memory] = await api.prometheusRange(context, spec.prometheus, from, end, step);
+            if (cancelled) return;
+            have = { cpu: merge(have?.cpu, cpu), memory: merge(have?.memory, memory), end };
+            setSeries({ cpu: have.cpu, memory: have.memory, source: "prometheus", step, end });
           } catch (e) {
             if (!cancelled) setSeries((s) => ({ ...s, source: "prometheus", step, end, error: String(e) }));
           }
         };
         load();
-        timer = setInterval(load, Math.min(30, Math.max(10, step)) * 1000);
+        stop = pollWhileVisible(load, METRICS_EVERY);
         return;
       }
       const buf = samples.get(spec.key) ?? { cpu: [], memory: [] };
@@ -153,11 +210,11 @@ export function useMetricSeries(context: string, spec: MetricSpec | null, active
       const last = buf.cpu[buf.cpu.length - 1];
       if (last && Date.now() / 1000 - last[0] < step) emit(Date.now() / 1000);
       else sample();
-      timer = setInterval(sample, SAMPLE_EVERY);
+      stop = pollWhileVisible(sample, SAMPLE_EVERY);
     })();
     return () => {
       cancelled = true;
-      if (timer) clearInterval(timer);
+      stop?.();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [context, key, active, span]);
@@ -177,8 +234,7 @@ export function podSpec(context: string, namespace: string, pod: string): Metric
       `sum(container_memory_working_set_bytes{${f}})`,
     ],
     sample: async () => {
-      const list = await api.podMetrics(context, namespace);
-      const u = list.find((x) => x.name === pod);
+      const u = await onePodUsage(context, namespace, pod);
       return u ? { cpu: u.cpu, memory: u.memory } : null;
     },
   };
@@ -212,7 +268,7 @@ export function workloadSpec(context: string, namespace: string, kind: string, n
       `sum(container_memory_working_set_bytes{${f}})`,
     ],
     sample: async () => {
-      const list = await api.podMetrics(context, namespace, selector);
+      const list = await podUsage(context, namespace, selector);
       if (!list.length) return null;
       return { cpu: list.reduce((a, u) => a + u.cpu, 0), memory: list.reduce((a, u) => a + u.memory, 0) };
     },
@@ -229,8 +285,7 @@ export function nodeSpec(context: string, node: string): MetricSpec {
       `sum(container_memory_working_set_bytes{id="/",node="${n}"}) or sum(container_memory_working_set_bytes{id="/",${inst}})`,
     ],
     sample: async () => {
-      const list = await api.nodeMetrics(context);
-      const u = list.find((x) => x.name === node);
+      const u = await oneNodeUsage(context, node);
       return u ? { cpu: u.cpu, memory: u.memory } : null;
     },
   };
@@ -244,7 +299,7 @@ export function clusterSpec(context: string): MetricSpec {
       `sum(container_memory_working_set_bytes{id="/"})`,
     ],
     sample: async () => {
-      const list = await api.nodeMetrics(context);
+      const list = await nodeUsage(context);
       if (!list.length) return null;
       return { cpu: list.reduce((a, u) => a + u.cpu, 0), memory: list.reduce((a, u) => a + u.memory, 0) };
     },

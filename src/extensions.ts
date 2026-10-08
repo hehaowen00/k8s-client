@@ -10,6 +10,7 @@ import { api, type KubeObject, type ResourceInfo } from "./api";
 import { toast } from "./components/Dialogs";
 import { openDetail, type Target } from "./actions";
 import { useTabs } from "./store";
+import { podUsage } from "./metrics";
 
 export interface KindFilter {
   group?: string;
@@ -101,7 +102,7 @@ function makeApi(ext: string, appVersion: string) {
       apply: (context: string, yaml: string, namespace?: string | null) => api.applyManifest(context, yaml, namespace ?? null),
       delete: (t: Target) => api.deleteResource(t),
       patch: (t: Target, patch: unknown) => api.patchResource(t, patch),
-      podMetrics: (context: string, namespace?: string | null) => api.podMetrics(context, namespace),
+      podMetrics: (context: string, namespace?: string | null) => podUsage(context, namespace ?? null),
     },
   });
 }

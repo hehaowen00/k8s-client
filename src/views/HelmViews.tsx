@@ -6,7 +6,7 @@ import { api, type HelmChart, type HelmRelease, type HelmReleaseDetails } from "
 import { inBackground, useOpenObject } from "../clusterNav";
 import { useDiscovery, useNamespaces } from "../hooks";
 import { useTabs } from "../store";
-import { formatAge, nsForApi, nsSelection, statusTone, useNow } from "../util";
+import { formatAge, nsForApi, nsSelection, pollWhileVisible, statusTone, useNow } from "../util";
 import { NamespacePicker } from "../components/NamespacePicker";
 import { YamlEditor } from "../components/YamlEditor";
 import { confirmDialog, toast } from "../components/Dialogs";
@@ -63,10 +63,10 @@ export function HelmReleases({ context, namespace, active, onNamespace }: { cont
         (e) => !cancelled && setError(String(e)),
       );
     load();
-    const t = setInterval(load, 10000);
+    const stop = pollWhileVisible(load, 10000);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      stop();
     };
   }, [context, namespace, active, nonce]);
 
