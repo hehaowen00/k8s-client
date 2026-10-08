@@ -162,14 +162,11 @@ export type SessionEvent =
   | { type: "data"; data: string }
   | { type: "exit"; message?: string | null };
 
-export interface EventInfo {
-  kind: string;
-  reason: string;
-  message: string;
-  count: number;
-  lastSeen?: string;
-  source: string;
-}
+export type ObjectEvent =
+  | { type: "reset"; items: KubeObject[] }
+  | { type: "upsert"; object: KubeObject }
+  | { type: "delete"; object: KubeObject }
+  | { type: "error"; message: string };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type KubeObject = Record<string, any>;
@@ -203,6 +200,107 @@ function startStream<E>(
   };
 }
 
+/** Follows a stream's events so a late subscriber can be caught up with a single event. */
+interface Tracker<E> {
+  apply: (e: E) => void;
+  snapshot: () => E | null;
+  error: (message: string) => E;
+}
+
+interface Shared<E> {
+  listeners: Set<(e: E) => void>;
+  tracker: Tracker<E>;
+  stop: () => void;
+  linger?: ReturnType<typeof setTimeout>;
+}
+
+const sharedStreams = new Map<string, unknown>();
+/** Keep an unused stream briefly so a remounting view (tab switch) picks it straight back up. */
+const SHARED_LINGER_MS = 5000;
+
+/** One backend stream per key, shared by every subscriber; late subscribers get the current state as a reset. */
+function sharedStream<E>(key: string, command: string, args: Record<string, unknown>, tracker: () => Tracker<E>, onEvent: (e: E) => void): () => void {
+  let s = sharedStreams.get(key) as Shared<E> | undefined;
+  if (!s) {
+    const t = tracker();
+    const listeners = new Set<(e: E) => void>();
+    const broadcast = (e: E) => {
+      t.apply(e);
+      listeners.forEach((l) => l(e));
+    };
+    const created: Shared<E> = { listeners, tracker: t, stop: () => {} };
+    // The stream never started (e.g. no connection): drop it so the next subscriber retries.
+    const failed = (message: string) => {
+      if (sharedStreams.get(key) === created) sharedStreams.delete(key);
+      broadcast(t.error(message));
+    };
+    created.stop = startStream<E>(command, args, broadcast, failed);
+    s = created;
+    sharedStreams.set(key, s);
+  } else {
+    clearTimeout(s.linger);
+    const shared = s;
+    queueMicrotask(() => {
+      const snap = shared.tracker.snapshot();
+      if (snap && shared.listeners.has(onEvent)) onEvent(snap);
+    });
+  }
+  const shared = s;
+  shared.listeners.add(onEvent);
+  return () => {
+    if (!shared.listeners.delete(onEvent) || shared.listeners.size) return;
+    shared.linger = setTimeout(() => {
+      if (shared.listeners.size) return;
+      shared.stop();
+      if (sharedStreams.get(key) === shared) sharedStreams.delete(key);
+    }, SHARED_LINGER_MS);
+  };
+}
+
+function tableTracker(): Tracker<TableEvent> {
+  let columns: Column[] | null = null;
+  let error: string | null = null;
+  const rows = new Map<string, Row>();
+  return {
+    apply: (e) => {
+      if (e.type === "reset") {
+        columns = e.columns;
+        error = null;
+        rows.clear();
+        e.rows.forEach((r) => rows.set(r.uid, r));
+      } else if (e.type === "upsert") e.rows.forEach((r) => rows.set(r.uid, r));
+      else if (e.type === "delete") e.uids.forEach((uid) => rows.delete(uid));
+      else error = e.message;
+    },
+    snapshot: () => (columns ? { type: "reset", columns, rows: [...rows.values()] } : error ? { type: "error", message: error } : null),
+    error: (message) => ({ type: "error", message }),
+  };
+}
+
+function objectTracker(): Tracker<ObjectEvent> {
+  let listed = false;
+  let error: string | null = null;
+  const items = new Map<string, KubeObject>();
+  const uid = (o: KubeObject) => o.metadata?.uid ?? `${o.metadata?.namespace}/${o.metadata?.name}`;
+  return {
+    apply: (e) => {
+      if (e.type === "reset") {
+        listed = true;
+        error = null;
+        items.clear();
+        e.items.forEach((o) => items.set(uid(o), o));
+      } else if (e.type === "upsert") items.set(uid(e.object), e.object);
+      else if (e.type === "delete") items.delete(uid(e.object));
+      else error = e.message;
+    },
+    snapshot: () => (listed ? { type: "reset", items: [...items.values()] } : error ? { type: "error", message: error } : null),
+    error: (message) => ({ type: "error", message }),
+  };
+}
+
+const streamKey = (command: string, context: string, r: ResourceInfo, namespace: string | null, selectors?: { labelSelector?: string | null; fieldSelector?: string | null }) =>
+  JSON.stringify([command, context, r.group, r.version, r.plural, namespace, selectors?.labelSelector || null, selectors?.fieldSelector || null]);
+
 export const api = {
   listContexts: () => invoke<ContextInfo[]>("list_contexts"),
   listKubeconfigFolders: () => invoke<FolderInfo[]>("list_kubeconfig_folders"),
@@ -218,9 +316,9 @@ export const api = {
   }) => invoke<ForwardInfo>("start_port_forward", opts),
   stopPortForward: (id: string) => invoke<ForwardInfo[]>("stop_port_forward", { id }),
   listPortForwards: () => invoke<ForwardInfo[]>("list_port_forwards"),
-  podMetrics: (context: string, namespace?: string | null, selector?: string | null) =>
-    invoke<Usage[]>("pod_metrics", { context, namespace, selector }),
-  nodeMetrics: (context: string) => invoke<Usage[]>("node_metrics", { context }),
+  podMetrics: (context: string, namespace?: string | null, selector?: string | null, name?: string | null) =>
+    invoke<Usage[]>("pod_metrics", { context, namespace, selector, name }),
+  nodeMetrics: (context: string, name?: string | null) => invoke<Usage[]>("node_metrics", { context, name }),
   prometheusDetect: (context: string, refresh = false) =>
     invoke<PrometheusTarget | null>("prometheus_detect", { context, refresh }),
   prometheusRange: (context: string, queries: string[], start: number, end: number, step: number) =>
@@ -269,15 +367,33 @@ export const api = {
     onEvent: (e: TableEvent) => void,
     selectors?: { labelSelector?: string | null; fieldSelector?: string | null },
   ) =>
-    startStream<TableEvent>("watch_resources", { context, resource, namespace, ...selectors }, onEvent, (message) =>
-      onEvent({ type: "error", message }),
+    sharedStream(
+      streamKey("watch_resources", context, resource, namespace, selectors),
+      "watch_resources",
+      { context, resource, namespace, ...selectors },
+      tableTracker,
+      onEvent,
+    ),
+
+  /** Live full objects; prefer this over polling `getObject`. */
+  watchObjects: (
+    context: string,
+    resource: ResourceInfo,
+    namespace: string | null,
+    onEvent: (e: ObjectEvent) => void,
+    selectors?: { labelSelector?: string | null; fieldSelector?: string | null },
+  ) =>
+    sharedStream(
+      streamKey("watch_objects", context, resource, namespace, selectors),
+      "watch_objects",
+      { context, resource, namespace, ...selectors },
+      objectTracker,
+      onEvent,
     ),
 
   getObject: (r: ObjRef) => invoke<KubeObject>("get_object", { ...r }),
   listObjects: (context: string, resource: ResourceInfo, namespace?: string | null, labelSelector?: string | null) =>
     invoke<KubeObject[]>("list_objects", { context, resource, namespace, labelSelector }),
-  listOwned: (context: string, resource: ResourceInfo, namespace: string | null, ownerUid: string) =>
-    invoke<KubeObject[]>("list_owned", { context, resource, namespace, ownerUid }),
   getYaml: (r: ObjRef) => invoke<string>("get_yaml", { ...r }),
   /** `originalYaml` lets the backend rebase over status-only changes on conflict. */
   replaceYaml: (r: ObjRef, yaml: string, originalYaml?: string | null) => invoke<string>("replace_yaml", { ...r, yaml, originalYaml }),
@@ -291,8 +407,6 @@ export const api = {
     invoke<{ namespace: string; pod: string }>("node_shell_create", { context, node }),
   triggerCronjob: (context: string, namespace: string, name: string) =>
     invoke<string>("trigger_cronjob", { context, namespace, name }),
-  listEvents: (context: string, namespace: string | null | undefined, uid: string) =>
-    invoke<EventInfo[]>("list_events", { context, namespace, uid }),
   applyManifest: (context: string, yaml: string, defaultNamespace: string | null) =>
     invoke<string[]>("apply_manifest", { context, yaml, defaultNamespace }),
 
@@ -369,6 +483,15 @@ export const hasWorkloadLogs = (r: ResourceInfo) =>
   (r.group === "apps" && ["Deployment", "StatefulSet", "DaemonSet", "ReplicaSet"].includes(r.kind)) ||
   (r.group === "batch" && r.kind === "Job");
 export const hasLogs = (r: ResourceInfo) => isPod(r) || hasWorkloadLogs(r);
+
+export const EVENT_RESOURCE: ResourceInfo = {
+  group: "",
+  version: "v1",
+  kind: "Event",
+  plural: "events",
+  namespaced: true,
+  verbs: [],
+};
 
 export const POD_RESOURCE: ResourceInfo = {
   group: "",

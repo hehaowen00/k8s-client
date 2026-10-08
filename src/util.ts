@@ -17,6 +17,29 @@ export function formatAge(ts?: string | null, now = Date.now()): string {
   return `${Math.floor(d / 365)}y${Math.floor((d % 365))}d`;
 }
 
+/**
+ * `setInterval` for API polling that skips ticks while the window is hidden and catches up once
+ * it's shown again. Returns the cleanup.
+ */
+export function pollWhileVisible(fn: () => void, intervalMs: number): () => void {
+  let missed = false;
+  const t = setInterval(() => {
+    if (document.hidden) missed = true;
+    else fn();
+  }, intervalMs);
+  const onVisible = () => {
+    if (!document.hidden && missed) {
+      missed = false;
+      fn();
+    }
+  };
+  document.addEventListener("visibilitychange", onVisible);
+  return () => {
+    clearInterval(t);
+    document.removeEventListener("visibilitychange", onVisible);
+  };
+}
+
 /** Re-render periodically so relative ages stay fresh. */
 export function useNow(intervalMs = 5000): number {
   const [now, setNow] = useState(Date.now());

@@ -1,10 +1,10 @@
 // Kind-specific detail panels beyond the basics (Ingress, storage, jobs, HPA, RBAC, CRDs)
 // and "related resources" (pods, endpoints, child jobs).
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { matchesKind, useExtensions, type ExtPanel } from "../extensions";
-import { api, hasWorkloadLogs, isNode, POD_RESOURCE, type KubeObject, type ResourceInfo } from "../api";
+import { hasWorkloadLogs, isNode, POD_RESOURCE, type KubeObject, type ResourceInfo } from "../api";
 import type { Target } from "../actions";
-import { useDiscovery } from "../hooks";
+import { useDiscovery, useWatchObjects } from "../hooks";
 import { useTabs } from "../store";
 import { ALL_NAMESPACES, formatAge, selectorString, statusTone, useNow } from "../util";
 import { ResourceTable } from "./ResourceTable";
@@ -294,20 +294,15 @@ function CronJobDetails({ obj, target }: { obj: KubeObject; target: Target }) {
   const discovery = useDiscovery(target.context);
   const jobRes = discovery.data?.find((r) => r.group === "batch" && r.kind === "Job");
   const openObject = useOpenObject();
-  const [jobs, setJobs] = useState<KubeObject[] | null>(null);
   const uid = obj.metadata?.uid;
-  const load = useCallback(() => {
-    if (!jobRes || !uid) return;
-    api.listOwned(target.context, jobRes, target.namespace, uid).then(
-      (j) => setJobs(j.sort((a, b) => String(b.metadata?.creationTimestamp).localeCompare(String(a.metadata?.creationTimestamp)))),
-      (e) => toast(String(e), "bad"),
-    );
-  }, [jobRes, uid, target.context, target.namespace]);
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 5000);
-    return () => clearInterval(t);
-  }, [load]);
+  const owned = useWatchObjects(target.context, uid ? jobRes : null, target.namespace, {}).items;
+  const jobs = useMemo(
+    () =>
+      owned
+        ?.filter((j) => j.metadata?.ownerReferences?.some((r: KubeObject) => r.uid === uid))
+        .sort((a, b) => String(b.metadata?.creationTimestamp).localeCompare(String(a.metadata?.creationTimestamp))) ?? null,
+    [owned, uid],
+  );
   return (
     <>
       <Section title="Schedule">
@@ -685,25 +680,10 @@ export function RelatedPods({
 }
 
 function Endpoints({ target }: { target: Target }) {
-  const [ep, setEp] = useState<KubeObject | null>(null);
   const discovery = useDiscovery(target.context);
   const epRes: ResourceInfo | undefined = discovery.data?.find((r) => r.group === "" && r.kind === "Endpoints");
-  useEffect(() => {
-    if (!epRes) return;
-    let cancelled = false;
-    const load = () =>
-      api.getObject({ ...target, resource: epRes }).then(
-        (o) => !cancelled && setEp(o),
-        () => !cancelled && setEp({}),
-      );
-    load();
-    const t = setInterval(load, 5000);
-    return () => {
-      cancelled = true;
-      clearInterval(t);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [epRes, target.context, target.namespace, target.name]);
+  const watched = useWatchObjects(target.context, epRes, target.namespace, { fieldSelector: `metadata.name=${target.name}` });
+  const ep = watched.items && (watched.items[0] ?? {});
   if (!ep) return null;
   const rows = (ep.subsets ?? []).flatMap((s: KubeObject) => [
     ...(s.addresses ?? []).map((a: KubeObject) => ({ a, ready: true, ports: s.ports ?? [] })),

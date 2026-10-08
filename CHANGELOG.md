@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+- Less load on the API server and less bandwidth: responses are gzip-compressed, lists are served from the API server's cache, and watches use bookmarks so they rarely need a full relist.
+- Detail views, events, endpoints, CronJob jobs and multi-pod logs follow changes with watches instead of polling every 3–5 seconds.
+- Helm releases only re-run `helm list` when a release has changed.
+- Polling (overview, sidebar counts, Helm releases, metrics) pauses while the window is hidden.
+- The overview follows the cluster with watches instead of listing every pod and workload every 10 seconds.
+- Tables in tabs left in the background for 5 minutes stop watching until they're shown again.
+- Permissions are cached for 10 minutes, and reconnecting a cluster refreshes them.
+- The pods table only fetches usage for the selected namespaces.
+- Views showing the same resources share one watch.
+- Metrics refresh every minute. Charts fetch only the pod or node they show, views share metrics requests, and Prometheus charts only fetch new points.
+- Sidebar counts refresh every 10 minutes and when a section is expanded, and the open resource shows its live count.
+
 ## 0.1.4 — 2026-10-08
 
 ### Added

@@ -30,6 +30,10 @@ pub struct AppState {
     registry: AsyncMutex<HashMap<String, ContextEntry>>,
     /// Detected Prometheus per context (None inside = looked, not found).
     prometheus: Mutex<HashMap<String, Option<crate::metrics::PrometheusTarget>>>,
+    /// Last `helm list` per (context, namespace), keyed by a fingerprint of the release secrets.
+    helm_lists: Mutex<HashMap<(String, String), (u64, serde_json::Value)>>,
+    /// Live overview watches per (context, namespace).
+    overviews: Mutex<HashMap<(String, String), Arc<crate::overview::OverviewWatch>>>,
     /// Node-shell pods created this run as (context, pod), deleted on exit in case their tab didn't.
     node_shells: Mutex<Vec<(String, String)>>,
 }
@@ -161,9 +165,54 @@ impl AppState {
         self.prometheus.lock().unwrap().insert(context.to_string(), t);
     }
 
+    pub fn helm_list_cached(&self, context: &str, namespace: &str, fingerprint: u64) -> Option<serde_json::Value> {
+        let lists = self.helm_lists.lock().unwrap();
+        lists
+            .get(&(context.to_string(), namespace.to_string()))
+            .filter(|(fp, _)| *fp == fingerprint)
+            .map(|(_, v)| v.clone())
+    }
+
+    pub fn store_helm_list(&self, context: &str, namespace: &str, fingerprint: u64, list: serde_json::Value) {
+        self.helm_lists.lock().unwrap().insert((context.to_string(), namespace.to_string()), (fingerprint, list));
+    }
+
+    pub fn overview(&self, key: &(String, String)) -> Option<Arc<crate::overview::OverviewWatch>> {
+        self.overviews.lock().unwrap().get(key).cloned()
+    }
+
+    /// The overview for `key`, starting one with `start` if needed. True when it was just started.
+    pub fn overview_or_insert(
+        &self,
+        key: &(String, String),
+        start: impl FnOnce() -> crate::overview::OverviewWatch,
+    ) -> (Arc<crate::overview::OverviewWatch>, bool) {
+        let mut overviews = self.overviews.lock().unwrap();
+        if let Some(w) = overviews.get(key) {
+            return (w.clone(), false);
+        }
+        let w = Arc::new(start());
+        overviews.insert(key.clone(), w.clone());
+        (w, true)
+    }
+
+    pub fn remove_overview(&self, key: &(String, String), watch: &Arc<crate::overview::OverviewWatch>) {
+        let mut overviews = self.overviews.lock().unwrap();
+        if overviews.get(key).is_some_and(|w| Arc::ptr_eq(w, watch)) {
+            overviews.remove(key);
+        }
+    }
+
     /// Drop cached client + discovery so the next call re-reads the kubeconfig.
     pub async fn reset(&self, context: &str) {
+        self.overviews.lock().unwrap().retain(|(c, _), w| {
+            if c == context {
+                w.stop();
+            }
+            c != context
+        });
         self.prometheus.lock().unwrap().remove(context);
+        self.helm_lists.lock().unwrap().retain(|(c, _), _| c != context);
         self.clients.lock().await.remove(context);
         self.discovery.lock().await.remove(context);
     }

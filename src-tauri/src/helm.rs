@@ -4,6 +4,8 @@
 use std::path::PathBuf;
 use std::process::Stdio;
 
+use k8s_openapi::api::core::v1::Secret;
+use kube::api::{Api, ListParams};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Manager, State};
@@ -107,15 +109,49 @@ impl Drop for TempValues {
 
 #[tauri::command]
 pub async fn helm_list(app: AppHandle, state: State<'_, AppState>, context: String, namespace: Option<String>) -> Result<Value> {
-    let helm = Helm::for_context(&app, &state, Some(&context)).await?;
     let ns = namespace.filter(|n| !n.is_empty());
+    let ns_key = ns.clone().unwrap_or_default();
+    // `helm list` reads every release secret in full; skip it while their metadata is unchanged.
+    let fingerprint = release_fingerprint(&state, &context, ns.as_deref()).await;
+    if let Some(cached) = fingerprint.and_then(|fp| state.helm_list_cached(&context, &ns_key, fp)) {
+        return Ok(cached);
+    }
+    let helm = Helm::for_context(&app, &state, Some(&context)).await?;
     // Explicit states instead of `--all` (removed in Helm 4); works on Helm 3 and 4.
     let mut args = vec!["list", "--deployed", "--failed", "--pending", "--uninstalling", "-o", "json", "--max", "5000"];
     match &ns {
         Some(n) => args.extend(["-n", n.as_str()]),
         None => args.push("-A"),
     }
-    helm.json(&args).await
+    let list = helm.json(&args).await?;
+    if let Some(fp) = fingerprint {
+        state.store_helm_list(&context, &ns_key, fp, list.clone());
+    }
+    Ok(list)
+}
+
+/// Hash of the Helm release secrets' resourceVersions (metadata only, from the watch cache).
+/// None when there's nothing to go on, e.g. no access or the ConfigMap storage driver.
+async fn release_fingerprint(state: &AppState, context: &str, namespace: Option<&str>) -> Option<u64> {
+    use std::hash::{Hash, Hasher};
+    let client = state.client(context).await.ok()?;
+    let api: Api<Secret> = match namespace {
+        Some(n) => Api::namespaced(client, n),
+        None => Api::all(client),
+    };
+    let list = api.list_metadata(&ListParams::default().match_any().labels("owner=helm")).await.ok()?;
+    if list.items.is_empty() {
+        return None;
+    }
+    let mut versions: Vec<(Option<String>, Option<String>, Option<String>)> = list
+        .items
+        .into_iter()
+        .map(|s| (s.metadata.namespace, s.metadata.name, s.metadata.resource_version))
+        .collect();
+    versions.sort();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    versions.hash(&mut h);
+    Some(h.finish())
 }
 
 #[derive(Serialize)]

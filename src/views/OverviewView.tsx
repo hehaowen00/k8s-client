@@ -4,7 +4,7 @@ import { inBackground, useOpenObject } from "../clusterNav";
 import { useDiscovery } from "../hooks";
 import { clusterSpec, useUsageMap } from "../metrics";
 import { contextLabel } from "../store";
-import { formatAge, formatBytes, formatCpu, formatPercent, useNow } from "../util";
+import { formatAge, formatBytes, formatCpu, formatPercent, pollWhileVisible, useNow } from "../util";
 import { Meter } from "../components/Chart";
 import { MetricsPanel } from "../components/MetricsPanel";
 
@@ -73,10 +73,10 @@ export function OverviewView({ context, namespace, active, onPick }: Props) {
         (e) => !cancelled && setLoaded((l) => ({ key, overview: l?.key === key ? l.overview : undefined, error: String(e) })),
       );
     load();
-    const t = setInterval(load, 10000);
+    const stop = pollWhileVisible(load, 10000);
     return () => {
       cancelled = true;
-      clearInterval(t);
+      stop();
     };
   }, [context, namespace, active, key]);
 
