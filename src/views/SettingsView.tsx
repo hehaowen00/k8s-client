@@ -5,12 +5,13 @@ import { getVersion } from "@tauri-apps/api/app";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { api, type FolderInfo } from "../api";
 import { EMPTY_CLUSTER, NO_MCP, bumpContexts, useContexts, useSettings, type ClusterSettings, type McpAccess, type Settings } from "../settings";
-import { useDiscovery } from "../hooks";
-import { backToHome, contextColor, contextLabel, openClusterSettings, type Tab } from "../store";
+import { useDiscovery, useNamespaces } from "../hooks";
+import { backToHome, contextColor, contextLabel, type Tab } from "../store";
 import { alertDialog, toast } from "../components/Dialogs";
 import { openPath } from "@tauri-apps/plugin-opener";
 import { useExtensions } from "../extensions";
 import { Checkbox } from "../components/Checkbox";
+import { Select } from "../components/Select";
 import { iconDataUrl } from "../clusterIcon";
 
 const COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
@@ -47,7 +48,6 @@ function CommitInput({ value, onCommit, placeholder, className }: { value: strin
 export function SettingsView() {
   const settings = useSettings((s) => s.settings);
   const save = useSettings((s) => s.save);
-  const contexts = useContexts();
   const [folders, setFolders] = useState<FolderInfo[]>([]);
 
   useEffect(() => {
@@ -118,26 +118,6 @@ export function SettingsView() {
             >
               + Add folder
             </button>
-          </Field>
-        </section>
-
-        <section className="settings-section">
-          <h2>Clusters</h2>
-          <Field label="Per-cluster settings" hint="Name, colour, icon, namespaces, proxy and MCP access">
-            <div className="folders">
-              {contexts.data?.map((c) => (
-                <div key={c.name} className="folder-row">
-                  <span className="tab-dot" style={{ background: contextColor(c.name) }} />
-                  <span className="cluster-settings-name" title={c.name}>
-                    {contextLabel(c.name)}
-                    {contextLabel(c.name) !== c.name && <span className="muted small"> — {c.name}</span>}
-                  </span>
-                  <button className="btn btn-xs btn-ghost" onClick={() => openClusterSettings(c.name)}>
-                    Settings
-                  </button>
-                </div>
-              ))}
-            </div>
           </Field>
         </section>
 
@@ -424,23 +404,76 @@ function ExtensionsSection() {
   );
 }
 
-const splitList = (v: string) =>
-  v
-    .split(/[,\s]+/)
-    .map((x) => x.trim())
-    .filter(Boolean);
+/** Filterable list of checkboxes. `locked` items can't be unticked; `allowAdd` lets the filter text be added as an item. */
+function Checklist({
+  items,
+  selected,
+  onChange,
+  loading,
+  error,
+  locked,
+  allowAdd,
+}: {
+  items: string[];
+  selected: string[];
+  onChange: (v: string[]) => void;
+  loading?: boolean;
+  error?: string | null;
+  locked?: (id: string) => boolean;
+  allowAdd?: boolean;
+}) {
+  const [filter, setFilter] = useState("");
+  const q = filter.trim().toLowerCase();
+  const shown = items.filter((id) => id.toLowerCase().includes(q));
+  const chosen = new Set(selected);
+  return (
+    <>
+      <input className="input wide-input" placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
+      <div className="folders mcp-resources">
+        {loading && <div className="folder-row muted small">Loading…</div>}
+        {error && <div className="folder-row small">{error}</div>}
+        {shown.map((id) => (
+          <div key={id} className="folder-row">
+            <Checkbox
+              checked={chosen.has(id)}
+              disabled={chosen.has(id) && locked?.(id)}
+              onChange={(e) => onChange(e.target.checked ? [...selected, id] : selected.filter((x) => x !== id))}
+            >
+              <span className="mono small">{id}</span>
+            </Checkbox>
+          </div>
+        ))}
+      </div>
+      <div className="swatches">
+        {allowAdd && q && !items.includes(filter.trim()) && (
+          <button className="btn btn-xs" onClick={() => (onChange([...selected, filter.trim()]), setFilter(""))}>
+            Add {filter.trim()}
+          </button>
+        )}
+        <button className="btn btn-xs" onClick={() => onChange([...new Set([...selected, ...shown])])}>
+          Select {q ? "Shown" : "All"}
+        </button>
+        {!locked && (
+          <button className="btn btn-xs btn-ghost" onClick={() => onChange(q ? selected.filter((x) => !shown.includes(x)) : [])}>
+            Clear {q ? "Shown" : "All"}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
 
 /** Per-cluster MCP sharing: which resource types, namespaces and data. */
 function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value: McpAccess; onChange: (v: McpAccess) => void }) {
   const set = (p: Partial<McpAccess>) => onChange({ ...value, ...p });
   const discovery = useDiscovery(value.enabled ? cluster : null);
-  const [filter, setFilter] = useState("");
-  const ids = useMemo(() => {
+  const namespaces = useNamespaces(value.enabled ? cluster : null);
+  const resourceIds = useMemo(() => {
     const found = (discovery.data ?? []).map((r) => (r.group ? `${r.plural}.${r.group}` : r.plural));
     return [...new Set([...value.resources, ...found])].sort();
   }, [discovery.data, value.resources]);
-  const selected = new Set(value.resources);
-  const shown = ids.filter((id) => id.includes(filter.trim().toLowerCase()));
+  const namespaceIds = useMemo(() => [...new Set([...value.namespaces, ...(namespaces.data ?? [])])].sort(), [namespaces.data, value.namespaces]);
+  const [restrict, setRestrict] = useState(value.namespaces.length > 0);
   return (
     <>
       <Field label="MCP access" hint="What AI assistants connected to Kube Portal's MCP server can read. Nothing is shared by default">
@@ -451,39 +484,45 @@ function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value
       {value.enabled && (
         <>
           <Field label="Resource types" hint={`${value.resources.length} shared, as kubectl-style tables`}>
-            <input className="input wide-input" placeholder="Filter" value={filter} onChange={(e) => setFilter(e.target.value)} />
-            <div className="folders mcp-resources">
-              {discovery.loading && <div className="folder-row muted small">Loading resource types…</div>}
-              {discovery.error && <div className="folder-row small">{discovery.error}</div>}
-              {shown.map((id) => (
-                <div key={id} className="folder-row">
-                  <Checkbox
-                    checked={selected.has(id)}
-                    onChange={(e) => set({ resources: e.target.checked ? [...value.resources, id] : value.resources.filter((x) => x !== id) })}
-                  >
-                    <span className="mono small">{id}</span>
-                  </Checkbox>
-                </div>
-              ))}
-            </div>
-            <div className="swatches">
-              <button className="btn btn-xs" onClick={() => set({ resources: [...new Set([...value.resources, ...shown])] })}>
-                Select {filter.trim() ? "shown" : "all"}
-              </button>
-              <button className="btn btn-xs btn-ghost" onClick={() => set({ resources: filter.trim() ? value.resources.filter((x) => !shown.includes(x)) : [] })}>
-                Clear {filter.trim() ? "shown" : "all"}
-              </button>
-            </div>
+            <Checklist
+              items={resourceIds}
+              selected={value.resources}
+              onChange={(resources) => set({ resources })}
+              loading={discovery.loading}
+              error={discovery.error}
+            />
           </Field>
-          <Field label="MCP namespaces" hint="Comma-separated; empty = all namespaces">
-            <CommitInput className="wide-input" value={value.namespaces.join(", ")} placeholder="all namespaces" onCommit={(v) => set({ namespaces: splitList(v) })} />
+          <Field
+            label="MCP namespaces"
+            hint={!restrict ? "All namespaces are shared" : value.namespaces.length ? `${value.namespaces.length} shared` : "Add a namespace; until then all are shared"}
+          >
+            <Checkbox
+              checked={!restrict}
+              onChange={(e) => {
+                setRestrict(!e.target.checked);
+                set({ namespaces: e.target.checked ? [] : namespaceIds });
+              }}
+            >
+              All namespaces
+            </Checkbox>
+            {restrict && (
+              <Checklist
+                items={namespaceIds}
+                selected={value.namespaces}
+                onChange={(ns) => ns.length && set({ namespaces: ns })}
+                loading={namespaces.loading}
+                error={namespaces.error}
+                locked={() => value.namespaces.length === 1}
+                allowAdd
+              />
+            )}
           </Field>
           <Field label="MCP data" hint="Without these, only table rows (what kubectl get shows) are shared">
             <Checkbox checked={value.objects} onChange={(e) => set({ objects: e.target.checked })}>
               Full objects (YAML; Secret values are always redacted)
             </Checkbox>
             <Checkbox checked={value.logs} onChange={(e) => set({ logs: e.target.checked })}>
-              Pod logs
+              Pod and deployment logs
             </Checkbox>
             <Checkbox checked={value.events} onChange={(e) => set({ events: e.target.checked })}>
               Events
@@ -494,6 +533,15 @@ function McpClusterAccess({ cluster, value, onChange }: { cluster: string; value
     </>
   );
 }
+
+const MCP_TOOLS = [
+  { name: "list_clusters", label: "List Clusters", hint: "Shared clusters and what each allows" },
+  { name: "list_resources", label: "List Resources", hint: "kubectl get tables of shared resource types" },
+  { name: "get_resource", label: "Get Resource", hint: "Full YAML of one object, where full objects are shared" },
+  { name: "get_deployment", label: "Get Deployment", hint: "Deployment status and its pods, where deployments.apps is shared" },
+  { name: "get_logs", label: "Get Logs", hint: "Pod or deployment logs, where logs are shared" },
+  { name: "list_events", label: "List Events", hint: "Events, where events are shared" },
+];
 
 interface McpStatus {
   running: boolean;
@@ -514,6 +562,8 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
   const [status, setStatus] = useState<McpStatus | null>(null);
   const [log, setLog] = useState<McpAccessEntry[]>([]);
   const [showToken, setShowToken] = useState(false);
+  const contexts = useContexts();
+  const [picked, setPicked] = useState<string | null>(null);
   useEffect(() => {
     const refresh = () => invoke<McpStatus>("mcp_status").then(setStatus, () => {});
     refresh();
@@ -525,6 +575,8 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
   const token = settings.mcpToken ?? "";
   const url = status?.url ?? `http://127.0.0.1:${settings.mcpPort}/mcp`;
   const shared = Object.entries(settings.clusters).filter(([, c]) => c.mcp?.enabled);
+  const cluster = picked ?? shared[0]?.[0] ?? contexts.data?.[0]?.name ?? null;
+  const cs = cluster ? settings.clusters[cluster] || EMPTY_CLUSTER : null;
   const copy = (text: string) => navigator.clipboard.writeText(text).then(() => toast("Copied"));
   const claudeCmd = `claude mcp add --transport http kube-portal ${url} --header "Authorization: Bearer ${token}"`;
   const jsonConfig = JSON.stringify({ mcpServers: { "kube-portal": { type: "http", url, headers: { Authorization: `Bearer ${token}` } } } }, null, 2);
@@ -550,11 +602,25 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
           }}
         />
       </Field>
-      <Field label="Shared clusters" hint="Choose in each cluster's settings, under MCP access">
+      <Field label="Tools" hint="Turned-off tools are hidden from clients and refused">
+        {MCP_TOOLS.map((t) => (
+          <Checkbox
+            key={t.name}
+            checked={!settings.mcpDisabledTools.includes(t.name)}
+            title={t.hint}
+            onChange={(e) =>
+              set({ mcpDisabledTools: e.target.checked ? settings.mcpDisabledTools.filter((n) => n !== t.name) : [...settings.mcpDisabledTools, t.name] })
+            }
+          >
+            {t.label} <span className="mono small muted">{t.name}</span>
+          </Checkbox>
+        ))}
+      </Field>
+      <Field label="Shared clusters">
         <span className="small">
           {shared.length ? (
             shared.map(([id]) => (
-              <button key={id} className="link" onClick={() => openClusterSettings(id)}>
+              <button key={id} className="link" onClick={() => setPicked(id)}>
                 {contextLabel(id)}
               </button>
             ))
@@ -563,6 +629,18 @@ function McpSection({ settings, set }: { settings: Settings; set: (p: Partial<Se
           )}
         </span>
       </Field>
+      <Field label="Cluster" hint="Choose a cluster to set what it shares">
+        <Select className="select" value={cluster ?? ""} onChange={(e) => setPicked(e.target.value)}>
+          {contexts.data?.map((c) => (
+            <option key={c.name} value={c.name} title={c.name}>
+              {contextLabel(c.name)}
+            </option>
+          ))}
+        </Select>
+      </Field>
+      {cluster && cs && (
+        <McpClusterAccess key={cluster} cluster={cluster} value={cs.mcp ?? NO_MCP} onChange={(mcp) => set({ clusters: { ...settings.clusters, [cluster]: { ...cs, mcp } } })} />
+      )}
       {settings.mcpEnabled && token && (
         <Field label="Connect a client" hint="Anyone with the token can read what you share">
           <div className="swatches">
