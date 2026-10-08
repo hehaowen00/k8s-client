@@ -11,6 +11,7 @@ use http_body_util::{BodyExt, Full};
 use hyper::body::{Bytes, Incoming};
 use hyper::{Method, Request, Response, StatusCode};
 use hyper_util::rt::TokioIo;
+use k8s_openapi::api::apps::v1::Deployment;
 use k8s_openapi::api::core::v1::{Event, Pod};
 use kube::api::{Api, ListParams, LogParams};
 use serde::Serialize;
@@ -25,6 +26,8 @@ use crate::state::{err, kerr, AppState, Result};
 
 const MAX_ROWS: usize = 500;
 const LOG_SIZE: usize = 500;
+/// Pods read per get_logs call on a deployment.
+const MAX_LOG_PODS: usize = 10;
 
 #[derive(Default)]
 pub struct McpServer {
@@ -191,11 +194,22 @@ async fn rpc(app: &AppHandle, method: &str, params: &Value) -> std::result::Resu
             }))
         }
         "ping" => Ok(json!({})),
-        "tools/list" => Ok(json!({"tools": tools()})),
+        "tools/list" => {
+            let off = disabled_tools(app);
+            let mut list = tools();
+            if let Some(a) = list.as_array_mut() {
+                a.retain(|t| !off.iter().any(|n| t["name"] == n.as_str()));
+            }
+            Ok(json!({"tools": list}))
+        }
         "tools/call" => {
             let name = params["name"].as_str().unwrap_or_default();
             let args = &params["arguments"];
-            let res = call_tool(app, name, args).await;
+            let res = if disabled_tools(app).iter().any(|n| n == name) {
+                Err(Fail::Denied(format!("tool \"{name}\" is turned off in Kube Portal")))
+            } else {
+                call_tool(app, name, args).await
+            };
             let cluster = args["cluster"].as_str().unwrap_or_default().to_string();
             let target = describe(name, args);
             let (outcome, detail, text, is_error) = match res {
@@ -217,6 +231,10 @@ async fn rpc(app: &AppHandle, method: &str, params: &Value) -> std::result::Resu
     }
 }
 
+fn disabled_tools(app: &AppHandle) -> Vec<String> {
+    app.state::<AppState>().settings.lock().unwrap().mcp_disabled_tools.clone()
+}
+
 fn record(app: &AppHandle, entry: AccessEntry) {
     let srv = app.state::<McpServer>();
     let mut log = srv.log.lock().unwrap();
@@ -234,7 +252,8 @@ fn describe(tool: &str, a: &Value) -> String {
     match tool {
         "list_resources" => format!("{}{}{}", s("resource"), ns("namespace"), if s("labelSelector").is_empty() { String::new() } else { format!(" [{}]", s("labelSelector")) }),
         "get_resource" => format!("{}/{}{}", s("resource"), s("name"), ns("namespace")),
-        "get_logs" => format!("pod/{}{}{}", s("pod"), if s("container").is_empty() { String::new() } else { format!(" ({})", s("container")) }, ns("namespace")),
+        "get_deployment" => format!("deployments.apps/{}{}", s("name"), ns("namespace")),
+        "get_logs" => format!("{}{}{}", if s("deployment").is_empty() { format!("pod/{}", s("pod")) } else { format!("deployment/{}", s("deployment")) }, if s("container").is_empty() { String::new() } else { format!(" ({})", s("container")) }, ns("namespace")),
         "list_events" => format!("events{}{}", if s("name").is_empty() { String::new() } else { format!(" for {}", s("name")) }, ns("namespace")),
         _ => String::new(),
     }
@@ -270,12 +289,21 @@ fn tools() -> Value {
             "annotations": {"readOnlyHint": true},
         },
         {
+            "name": "get_deployment",
+            "description": "Status of one deployment: replicas, containers and images, conditions, and its pods if pods are shared. Only where deployments.apps is shared.",
+            "inputSchema": {"type": "object", "required": ["cluster", "namespace", "name"], "properties": {
+                "cluster": cluster, "namespace": {"type": "string"}, "name": {"type": "string"},
+            }},
+            "annotations": {"readOnlyHint": true},
+        },
+        {
             "name": "get_logs",
-            "description": "Recent log lines of a pod container. Only where the cluster allows logs.",
-            "inputSchema": {"type": "object", "required": ["cluster", "namespace", "pod"], "properties": {
+            "description": "Recent log lines of a pod, or of every pod of a deployment (each line prefixed with its pod). Give pod or deployment. Only where the cluster allows logs.",
+            "inputSchema": {"type": "object", "required": ["cluster", "namespace"], "properties": {
                 "cluster": cluster, "namespace": {"type": "string"}, "pod": {"type": "string"},
-                "container": {"type": "string"},
-                "tailLines": {"type": "integer", "description": "Default 200, max 2000"},
+                "deployment": {"type": "string", "description": format!("Deployment name; logs of up to {MAX_LOG_PODS} of its pods")},
+                "container": {"type": "string", "description": "Defaults to the pod's default container"},
+                "tailLines": {"type": "integer", "description": "Default 200 (per pod), max 2000"},
                 "previous": {"type": "boolean", "description": "Logs of the previous (crashed) container"},
             }},
             "annotations": {"readOnlyHint": true},
@@ -374,6 +402,74 @@ async fn resolve(state: &AppState, cluster: &str, a: &McpAccess, id: &str) -> st
         .ok_or_else(|| Fail::Error(format!("the cluster has no resource type \"{id}\"")))
 }
 
+/// Label selector string for a deployment's pods.
+fn deployment_selector(d: &Deployment) -> std::result::Result<String, Fail> {
+    let sel = d.spec.as_ref().map(|s| &s.selector);
+    let mut parts: Vec<String> = sel.and_then(|s| s.match_labels.as_ref()).into_iter().flatten().map(|(k, v)| format!("{k}={v}")).collect();
+    for e in sel.and_then(|s| s.match_expressions.as_ref()).into_iter().flatten() {
+        let values = e.values.clone().unwrap_or_default().join(",");
+        parts.push(match e.operator.as_str() {
+            "In" => format!("{} in ({values})", e.key),
+            "NotIn" => format!("{} notin ({values})", e.key),
+            "Exists" => e.key.clone(),
+            _ => format!("!{}", e.key),
+        });
+    }
+    if parts.is_empty() {
+        return Err(Fail::Error("deployment has no pod selector".into()));
+    }
+    Ok(parts.join(","))
+}
+
+fn default_container(p: &Pod) -> Option<String> {
+    let ann = p.metadata.annotations.as_ref().and_then(|a| a.get("kubectl.kubernetes.io/default-container")).cloned();
+    ann.or_else(|| p.spec.as_ref()?.containers.first().map(|c| c.name.clone()))
+}
+
+/// Status without env vars or volumes, which may hold credentials.
+fn deployment_summary(d: &Deployment) -> Value {
+    let spec = d.spec.as_ref();
+    let st = d.status.as_ref();
+    let containers: Vec<Value> = spec
+        .and_then(|s| s.template.spec.as_ref())
+        .map(|p| p.containers.iter().map(|c| json!({"name": c.name, "image": c.image, "ports": c.ports, "resources": c.resources})).collect())
+        .unwrap_or_default();
+    let conditions: Vec<Value> = st
+        .and_then(|s| s.conditions.as_ref())
+        .into_iter()
+        .flatten()
+        .map(|c| json!({"type": c.type_, "status": c.status, "reason": c.reason, "message": c.message}))
+        .collect();
+    json!({
+        "name": d.metadata.name,
+        "namespace": d.metadata.namespace,
+        "revision": d.metadata.annotations.as_ref().and_then(|a| a.get("deployment.kubernetes.io/revision")),
+        "replicas": {
+            "desired": spec.and_then(|s| s.replicas).unwrap_or(1),
+            "ready": st.and_then(|s| s.ready_replicas).unwrap_or(0),
+            "updated": st.and_then(|s| s.updated_replicas).unwrap_or(0),
+            "available": st.and_then(|s| s.available_replicas).unwrap_or(0),
+            "unavailable": st.and_then(|s| s.unavailable_replicas).unwrap_or(0),
+        },
+        "strategy": spec.and_then(|s| s.strategy.as_ref()).and_then(|s| s.type_.clone()),
+        "paused": spec.and_then(|s| s.paused).unwrap_or(false),
+        "containers": containers,
+        "conditions": conditions,
+    })
+}
+
+fn pod_summary(p: &Pod) -> Value {
+    let statuses = p.status.as_ref().and_then(|s| s.container_statuses.clone()).unwrap_or_default();
+    json!({
+        "name": p.metadata.name,
+        "phase": p.status.as_ref().and_then(|s| s.phase.clone()),
+        "ready": format!("{}/{}", statuses.iter().filter(|c| c.ready).count(), statuses.len()),
+        "restarts": statuses.iter().map(|c| c.restart_count).sum::<i32>(),
+        "node": p.spec.as_ref().and_then(|s| s.node_name.clone()),
+        "started": p.status.as_ref().and_then(|s| s.start_time.as_ref()).map(|t| t.0.to_string()),
+    })
+}
+
 async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
     let state = app.state::<AppState>();
     let state: &AppState = &state;
@@ -467,9 +563,51 @@ async fn call_tool(app: &AppHandle, name: &str, a: &Value) -> ToolResult {
                 previous: a["previous"].as_bool().unwrap_or(false),
                 ..Default::default()
             };
-            let text = Api::<Pod>::namespaced(client, ns).logs(need_segment(a, "pod")?, &lp).await.map_err(kerr)?;
-            let detail = format!("{} line(s)", text.lines().count());
-            Ok((text, detail))
+            let pods: Api<Pod> = Api::namespaced(client.clone(), ns);
+            let Some(dep) = arg(a, "deployment") else {
+                let text = pods.logs(need_segment(a, "pod")?, &lp).await.map_err(kerr)?;
+                let detail = format!("{} line(s)", text.lines().count());
+                return Ok((text, detail));
+            };
+            check_segment("deployment", dep)?;
+            let d = Api::<Deployment>::namespaced(client, ns).get(dep).await.map_err(kerr)?;
+            let mut list = pods.list(&ListParams::default().labels(&deployment_selector(&d)?)).await.map_err(kerr)?.items;
+            list.sort_by(|x, y| x.metadata.name.cmp(&y.metadata.name));
+            let total = list.len();
+            let reads = list.iter().take(MAX_LOG_PODS).map(|p| {
+                let name = p.metadata.name.clone().unwrap_or_default();
+                let lp = LogParams { container: lp.container.clone().or_else(|| default_container(p)), ..lp.clone() };
+                let pods = &pods;
+                async move { (pods.logs(&name, &lp).await, name) }
+            });
+            let mut out = String::new();
+            for (res, name) in futures::future::join_all(reads).await {
+                match res {
+                    Ok(text) => text.lines().for_each(|l| out.push_str(&format!("[{name}] {l}\n"))),
+                    Err(e) => out.push_str(&format!("[{name}] <could not read logs: {}>\n", kerr(e))),
+                }
+            }
+            if total > MAX_LOG_PODS {
+                out.push_str(&format!("<{} more pod(s) not shown>\n", total - MAX_LOG_PODS));
+            }
+            Ok((out, format!("{} pod(s)", total.min(MAX_LOG_PODS))))
+        }
+        "get_deployment" => {
+            let cluster = need(a, "cluster")?;
+            let acc = access(state, cluster)?;
+            if !acc.resources.iter().any(|r| r == "deployments.apps") {
+                return Err(Fail::Denied("resource type \"deployments.apps\" is not shared on this cluster".into()));
+            }
+            let ns = need(a, "namespace")?;
+            check_ns(&acc, ns)?;
+            let client = state.client(cluster).await?;
+            let d = Api::<Deployment>::namespaced(client.clone(), ns).get(need_segment(a, "name")?).await.map_err(kerr)?;
+            let mut out = deployment_summary(&d);
+            if acc.resources.iter().any(|r| r == "pods") {
+                let list = Api::<Pod>::namespaced(client, ns).list(&ListParams::default().labels(&deployment_selector(&d)?)).await.map_err(kerr)?;
+                out["pods"] = list.items.iter().map(pod_summary).collect();
+            }
+            Ok((serde_json::to_string_pretty(&out).map_err(err)?, out["replicas"].to_string()))
         }
         "list_events" => {
             let cluster = need(a, "cluster")?;
