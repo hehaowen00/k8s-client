@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.5 — 2026-10-11
 
 ### Changed
 - Less load on the API server and less bandwidth: responses are gzip-compressed, lists are served from the API server's cache, and watches use bookmarks so they rarely need a full relist.
@@ -14,6 +14,8 @@
 - Views showing the same resources share one watch.
 - Metrics refresh every minute. Charts fetch only the pod or node they show, views share metrics requests, and Prometheus charts only fetch new points.
 - Sidebar counts refresh every 10 minutes and when a section is expanded, and the open resource shows its live count.
+- Toolbars are more compact.
+- The pinned clusters bar has even spacing around and between clusters.
 
 ## 0.1.4 — 2026-10-08
 
