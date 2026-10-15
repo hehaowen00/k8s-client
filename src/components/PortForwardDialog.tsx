@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { create } from "zustand";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { api } from "../api";
+import { loadPortForwards } from "../hooks";
 import { toast } from "./Dialogs";
 import { Select } from "./Select";
 import { Checkbox } from "./Checkbox";
@@ -59,6 +60,7 @@ export function PortForwardDialogHost() {
     try {
       const f = await api.startPortForward({ ...req, remotePort: remote, localPort });
       toast(S.portForward.forwarding(f.localPort, `${req.kind}/${req.name}:${remote}`));
+      loadPortForwards();
       if (browser) openUrl(`http://localhost:${f.localPort}`).catch((e) => toast(String(e), "bad"));
       close();
     } catch (e) {

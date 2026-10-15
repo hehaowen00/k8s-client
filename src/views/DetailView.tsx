@@ -30,7 +30,7 @@ import {
   scaleTarget,
   type Target,
 } from "../actions";
-import { useDiscovery, useWatchObjects } from "../hooks";
+import { stopPortForward, useDiscovery, usePortForwards, useWatchObjects } from "../hooks";
 import { inBackground, useOpenObject } from "../clusterNav";
 import { openSession, useTabs, type Tab } from "../store";
 import { decodeBase64, formatAge, parseQuantity, selectorString, statusTone, useNow } from "../util";
@@ -451,7 +451,7 @@ function Overview({ obj, target, active }: { obj: KubeObject; target: Target; ac
         </dl>
       </Section>
 
-      <KindSpecific obj={obj} target={target} />
+      <KindSpecific obj={obj} target={target} active={active} />
       <KindExtras obj={obj} target={target} active={active} />
 
       {conditions?.length ? (
@@ -494,7 +494,30 @@ function containerState(s?: KubeObject): string {
   return "";
 }
 
-function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
+function ActiveForwards({ target, port, active }: { target: Target; port: number; active: boolean }) {
+  const kind = target.resource.kind === "Service" ? "service" : "pod";
+  const forwards = usePortForwards(active).filter(
+    (f) =>
+      f.context === target.context &&
+      f.namespace === (target.namespace ?? "default") &&
+      f.kind === kind &&
+      f.name === target.name &&
+      f.remotePort === port,
+  );
+  return forwards.map((f) => (
+    <span key={f.id} className="port-item">
+      <span className="mono muted">localhost:{f.localPort}</span>
+      <button
+        className="btn btn-xs btn-danger-ghost"
+        onClick={() => stopPortForward(f.id).catch((e) => toast(String(e), "bad"))}
+      >
+        {S.common.stop}
+      </button>
+    </span>
+  ));
+}
+
+function KindSpecific({ obj, target, active }: { obj: KubeObject; target: Target; active: boolean }) {
   const { resource } = target;
   const spec = obj.spec ?? {};
   const status = obj.status ?? {};
@@ -567,12 +590,15 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
                               {p.name ? `${p.name}: ` : ""}
                               {p.containerPort}/{p.protocol ?? "TCP"}
                               {!init && (
-                                <button
-                                  className="btn btn-xs"
-                                  onClick={() => portForwardTarget(target, obj, p.containerPort)}
-                                >
-                                  {S.detail.forward}
-                                </button>
+                                <>
+                                  <button
+                                    className="btn btn-xs"
+                                    onClick={() => portForwardTarget(target, obj, p.containerPort)}
+                                  >
+                                    {S.detail.forward}
+                                  </button>
+                                  <ActiveForwards target={target} port={p.containerPort} active={active} />
+                                </>
                               )}
                             </span>
                           ))}
@@ -667,6 +693,7 @@ function KindSpecific({ obj, target }: { obj: KubeObject; target: Target }) {
                 <button className="btn btn-xs" onClick={() => portForwardTarget(target, obj, p.port)}>
                   {S.detail.forward}
                 </button>
+                <ActiveForwards target={target} port={p.port} active={active} />
               </div>
             ))}
           </KV>

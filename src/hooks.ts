@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type KubeObject, type ResourceInfo } from "./api";
+import { create } from "zustand";
+import { api, type ForwardInfo, type KubeObject, type ResourceInfo } from "./api";
 import { forgetPerms } from "./permissions";
 
 const discoveryCache = new Map<string, Promise<ResourceInfo[]>>();
@@ -17,6 +18,33 @@ export function forgetContext(context: string) {
   discoveryCache.delete(context);
   namespaceCache.delete(context);
   forgetPerms(context);
+}
+
+const useForwardStore = create<{ list: ForwardInfo[] }>(() => ({ list: [] }));
+
+export const setPortForwards = (list: ForwardInfo[]) => useForwardStore.setState({ list });
+
+export function stopPortForward(id: string) {
+  return api.stopPortForward(id).then(setPortForwards);
+}
+
+let forwardPollers = 0;
+let forwardTimer: ReturnType<typeof setInterval> | undefined;
+export const loadPortForwards = () => api.listPortForwards().then(setPortForwards, () => {});
+
+/** Active port forwards, polled once for all active callers since forwards can stop on their own or elsewhere. */
+export function usePortForwards(active: boolean) {
+  useEffect(() => {
+    if (!active) return;
+    if (forwardPollers++ === 0) {
+      loadPortForwards();
+      forwardTimer = setInterval(loadPortForwards, 1500);
+    }
+    return () => {
+      if (--forwardPollers === 0) clearInterval(forwardTimer);
+    };
+  }, [active]);
+  return useForwardStore((s) => s.list);
 }
 
 const sameDeps = (a: unknown[], b: unknown[]) => a.length === b.length && a.every((x, i) => Object.is(x, b[i]));

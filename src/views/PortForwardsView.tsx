@@ -1,19 +1,12 @@
-import { useEffect, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { api, type ForwardInfo } from "../api";
+import { api } from "../api";
 import { toast } from "../components/Dialogs";
+import { setPortForwards, stopPortForward, usePortForwards } from "../hooks";
 import { contextColor, contextLabel } from "../store";
 import { S } from "../strings";
 
 export function PortForwardsView({ active }: { active: boolean }) {
-  const [list, setList] = useState<ForwardInfo[]>([]);
-  useEffect(() => {
-    if (!active) return;
-    const load = () => api.listPortForwards().then(setList, () => {});
-    load();
-    const t = setInterval(load, 1500);
-    return () => clearInterval(t);
-  }, [active]);
+  const list = usePortForwards(active);
 
   return (
     <div className="pf-view">
@@ -28,7 +21,7 @@ export function PortForwardsView({ active }: { active: boolean }) {
             className="btn btn-sm btn-danger-ghost"
             onClick={async () => {
               for (const f of list) await api.stopPortForward(f.id);
-              setList([]);
+              setPortForwards([]);
             }}
           >
             {S.portForward.stopAll}
@@ -93,7 +86,7 @@ export function PortForwardsView({ active }: { active: boolean }) {
                     </button>
                     <button
                       className="btn btn-xs btn-danger-ghost"
-                      onClick={() => api.stopPortForward(f.id).then(setList)}
+                      onClick={() => stopPortForward(f.id).catch((e) => toast(String(e), "bad"))}
                     >
                       {S.common.stop}
                     </button>
