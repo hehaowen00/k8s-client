@@ -48,6 +48,26 @@ function lowerBound<T>(a: T[], n: number, key: (x: T) => number): number {
   }
   return lo;
 }
+/** Absolutely positioned rows serialise without line breaks, so join the selected rows explicitly. */
+function copyLines(e: React.ClipboardEvent<HTMLElement>) {
+  const sel = window.getSelection();
+  if (!sel || sel.isCollapsed || !sel.rangeCount) return;
+  const range = sel.getRangeAt(0);
+  const rows = [...e.currentTarget.querySelectorAll<HTMLElement>(".log-line")].filter((r) => range.intersectsNode(r));
+  if (rows.length < 2) return;
+  const text = rows
+    .map((r) => {
+      const part = document.createRange();
+      part.selectNodeContents(r);
+      if (r.contains(range.startContainer)) part.setStart(range.startContainer, range.startOffset);
+      if (r.contains(range.endContainer)) part.setEnd(range.endContainer, range.endOffset);
+      return part.toString();
+    })
+    .join("\n");
+  e.clipboardData.setData("text/plain", text);
+  e.preventDefault();
+}
+
 const lineN = (l: Line) => l.n;
 const num = (x: number) => x;
 
@@ -656,6 +676,7 @@ export function LogsView({
           className="logs-body"
           ref={scrollRef}
           tabIndex={0}
+          onCopy={copyLines}
           onKeyDown={(e) => {
             if (e.key === "End") {
               e.preventDefault();
