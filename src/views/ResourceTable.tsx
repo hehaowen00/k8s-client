@@ -28,6 +28,7 @@ const EMPTY_LIST: string[] = [];
 
 const ROW_HEIGHT = 30;
 const OVERSCAN = 12;
+const MIN_COL_WIDTH = 48;
 
 interface Props {
   context: string;
@@ -240,8 +241,8 @@ export function ResourceTable(props: Props) {
     nsList.includes(null) ? null : (nsList as string[]),
     props.active,
   );
-  // Per-kind column layout: hidden columns and order, by label.
-  const [layout, setLayout] = usePref<{ hidden: string[]; order: string[] }>(
+  // Per-kind column layout: hidden columns, order and widths, by label.
+  const [layout, setLayout] = usePref<{ hidden: string[]; order: string[]; widths?: Record<string, number> }>(
     `columns.${resource.group}/${resource.kind}`,
     { hidden: [], order: [] },
   );
@@ -259,6 +260,39 @@ export function ResourceTable(props: Props) {
     return [...visible].sort((a, b) => rank(a) - rank(b));
   }, [allCols, layout]);
   const [dragCol, setDragCol] = useState<string | null>(null);
+  // Widths follow the pointer in state and are saved once, when the drag ends.
+  const [resizing, setResizing] = useState<{ label: string; width: number } | null>(null);
+  const resizingRef = useRef(false);
+  const widthOf = (c: DisplayColumn) => (resizing?.label === c.label ? resizing.width : layout.widths?.[c.label]);
+  const startResize = (e: React.PointerEvent<HTMLSpanElement>, label: string) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const handle = e.currentTarget;
+    handle.setPointerCapture(e.pointerId);
+    resizingRef.current = true;
+    const startX = e.clientX;
+    const startWidth = handle.parentElement!.getBoundingClientRect().width;
+    let width = startWidth;
+    const move = (ev: PointerEvent) => {
+      width = Math.max(MIN_COL_WIDTH, Math.round(startWidth + ev.clientX - startX));
+      setResizing({ label, width });
+    };
+    const up = () => {
+      handle.removeEventListener("pointermove", move);
+      handle.removeEventListener("pointerup", up);
+      handle.removeEventListener("pointercancel", up);
+      resizingRef.current = false;
+      setResizing(null);
+      if (width !== startWidth) setLayout({ ...layout, widths: { ...layout.widths, [label]: width } });
+    };
+    handle.addEventListener("pointermove", move);
+    handle.addEventListener("pointerup", up);
+    handle.addEventListener("pointercancel", up);
+  };
+  const resetWidth = (label: string) => {
+    const { [label]: _, ...widths } = layout.widths ?? {};
+    setLayout({ ...layout, widths });
+  };
   const columnMenu = (e: React.MouseEvent) =>
     openContextMenu(e, [
       ...allCols
@@ -416,15 +450,17 @@ export function ResourceTable(props: Props) {
   // [grid track, minimum px]; the minimums set the table's scroll width when space is tight.
   const tracks: [string, number][] = [
     ...(selectable ? [["32px", 32] as [string, number]] : []),
-    ...displayCols.map((c): [string, number] =>
-      c.kind === "name"
+    ...displayCols.map((c): [string, number] => {
+      const w = widthOf(c);
+      if (w) return [`${w}px`, w];
+      return c.kind === "name"
         ? ["minmax(220px, 3fr)", 220]
         : c.kind === "age"
           ? ["80px", 80]
           : c.kind === "number" || c.kind === "cpu" || c.kind === "memory"
             ? ["minmax(76px, 0.6fr)", 76]
-            : ["minmax(96px, 1fr)", 96],
-    ),
+            : ["minmax(96px, 1fr)", 96];
+    }),
   ];
   const gridTemplate = tracks.map((t) => t[0]).join(" ");
   const minTableWidth = tracks.reduce((a, t) => a + t[1], 0);
@@ -491,7 +527,10 @@ export function ResourceTable(props: Props) {
               style={c.kind === "name" ? { left: nameLeft } : undefined}
               title={S.table.columnHint(c.description)}
               draggable
-              onDragStart={() => setDragCol(c.label)}
+              onDragStart={(e) => {
+                if (resizingRef.current) e.preventDefault();
+                else setDragCol(c.label);
+              }}
               onDragEnd={() => setDragCol(null)}
               onDragOver={(e) => e.preventDefault()}
               onDrop={(e) => {
@@ -511,6 +550,15 @@ export function ResourceTable(props: Props) {
             >
               {c.label}
               {sort?.key === c.key && <span className="sort-ind">{sort.dir === 1 ? "▲" : "▼"}</span>}
+              <span
+                className={`col-resize ${resizing?.label === c.label ? "active" : ""}`}
+                onPointerDown={(e) => startResize(e, c.label)}
+                onClick={(e) => e.stopPropagation()}
+                onDoubleClick={(e) => {
+                  e.stopPropagation();
+                  resetWidth(c.label);
+                }}
+              />
             </button>
           ))}
         </div>

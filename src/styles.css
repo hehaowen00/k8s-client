@@ -2030,6 +2030,21 @@ mark {
 .rtable-th.droppable {
   box-shadow: inset 2px 0 0 var(--accent);
 }
+.rtable-th {
+  position: relative;
+}
+.col-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+}
+.col-resize:hover,
+.col-resize.active {
+  box-shadow: inset -2px 0 0 var(--accent);
+}
 .ns-picker {
   position: relative;
 }

@@ -341,8 +341,8 @@ export const S = {
     selectRow: (name: string) => `Select ${name}`,
     columnHint: (description?: string) =>
       description
-        ? `${description}\n(right-click to choose columns, drag to reorder)`
-        : "Right-click to choose columns, drag to reorder",
+        ? `${description}\n(right-click to choose columns, drag to reorder, drag the edge to resize)`
+        : "Right-click to choose columns, drag to reorder, drag the edge to resize",
     retrying: " — retrying",
     loading: (kind: string) => `Loading ${kind}`,
     noMatches: "No items match the filter",

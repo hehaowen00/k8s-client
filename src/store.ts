@@ -97,6 +97,30 @@ interface TabsState {
 
 const newId = () => Math.random().toString(36).slice(2, 10);
 
+/** Detail and logs views of the same thing are focused instead of opened twice; shells and terminals can repeat. */
+function sameView(a: NewTab, b: Tab): boolean {
+  if (a.kind === "detail" && b.kind === "detail") {
+    return (
+      a.context === b.context &&
+      a.resource.group === b.resource.group &&
+      a.resource.kind === b.resource.kind &&
+      a.namespace === b.namespace &&
+      a.name === b.name
+    );
+  }
+  if (a.kind === "logs" && b.kind === "logs") {
+    return (
+      a.context === b.context &&
+      a.namespace === b.namespace &&
+      a.pod === b.pod &&
+      a.workload?.kind === b.workload?.kind &&
+      a.workload?.name === b.workload?.name &&
+      (a.container ?? null) === (b.container ?? null)
+    );
+  }
+  return false;
+}
+
 /** Last namespace picked per context, so new cluster tabs reopen where you left off (survives restarts). */
 const LAST_NS_KEY = "kubetab.lastNamespace";
 function lastNamespaces(): Record<string, string> {
@@ -185,6 +209,18 @@ export const useTabs = create<TabsState>()(
         if (home) {
           set({ activeId: home.id });
           return home.id;
+        }
+        const dup = get().tabs.find((t) => sameView(tab, t));
+        if (dup) {
+          set((s) => ({
+            tabs:
+              tab.kind === "detail" && tab.view
+                ? s.tabs.map((t) => (t === dup ? { ...t, view: tab.view } : t))
+                : s.tabs,
+            activeId: opts?.background ? s.activeId : dup.id,
+            splitId: !opts?.background && s.splitId === dup.id ? s.activeId : s.splitId,
+          }));
+          return dup.id;
         }
         const id = newId();
         set((s) => {
@@ -393,6 +429,12 @@ function setDock(tabId: string, fn: (d: DockState) => DockState) {
 
 export const dock = {
   add(tabId: string, item: NewDockItem) {
+    const host = useTabs.getState().tabs.find((t) => t.id === tabId);
+    const dup = isDockHost(host) ? host.dock?.items.find((i) => sameView(item, i)) : undefined;
+    if (dup) {
+      dock.activate(tabId, dup.id);
+      return dup.id;
+    }
     const id = newId();
     setDock(tabId, (d) => ({ ...d, items: [...d.items, { ...item, id } as DockItem], activeId: id, open: true }));
     return id;
