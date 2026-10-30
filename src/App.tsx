@@ -19,7 +19,7 @@ import { AddClusterDialogHost } from "./components/AddClusterDialog";
 import { Hotbar } from "./components/Hotbar";
 import { ClusterSettingsView, SettingsView } from "./views/SettingsView";
 import { useResolvedTheme, useSettings, useSettingsBootstrap } from "./settings";
-import { dock, isDockHost, openSingleton } from "./store";
+import { dock, isDockHost, openSingleton, useSidebar } from "./store";
 import { CommandPaletteHost, openPalette } from "./components/CommandPalette";
 import { usePref } from "./hooks";
 import { loadExtensions } from "./extensions";
@@ -50,8 +50,8 @@ const TabContent = memo(function TabContent({ tab, active }: { tab: Tab; active:
 });
 
 export default function App() {
-  const { tabs, activeId, splitId } = useTabs(
-    useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, splitId: s.splitId })),
+  const { tabs, activeId, leftId, splitId } = useTabs(
+    useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, leftId: s.leftId, splitId: s.splitId })),
   );
   const open = useTabs((s) => s.open);
   const close = useTabs((s) => s.close);
@@ -61,7 +61,11 @@ export default function App() {
   const [savedRatio, saveRatio] = usePref("split.ratio", 0.5);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const splitRatio = dragRatio ?? savedRatio;
-  const split = splitId && splitId !== activeId && tabs.some((t) => t.id === splitId) ? splitId : null;
+  const split =
+    splitId && leftId && splitId !== leftId && tabs.some((t) => t.id === splitId) && tabs.some((t) => t.id === leftId)
+      ? splitId
+      : null;
+  const leftPane = split ? leftId : activeId;
   useSettingsBootstrap();
   useEffect(() => {
     loadExtensions();
@@ -111,6 +115,9 @@ export default function App() {
       } else if (e.key === "\\") {
         e.preventDefault();
         toggleSplit();
+      } else if (e.key === "b" && !e.shiftKey) {
+        e.preventDefault();
+        useSidebar.getState().toggle();
       } else if (e.key === "t" && !e.shiftKey) {
         e.preventDefault();
         open({ kind: "home" });
@@ -152,7 +159,7 @@ export default function App() {
         <Hotbar />
         <div className={`tab-panels ${split ? "is-split" : ""}`}>
           {tabs.map((t) => {
-            const left = t.id === activeId;
+            const left = t.id === leftPane;
             const right = t.id === split;
             const style: React.CSSProperties =
               !left && !right
@@ -167,7 +174,7 @@ export default function App() {
                 key={t.id}
                 className={`tab-panel ${right ? "split-pane" : ""}`}
                 style={style}
-                onMouseDown={() => right && activate(t.id)}
+                onMouseDown={() => split && t.id !== activeId && activate(t.id)}
               >
                 <TabContent tab={t} active={left || right} />
               </div>

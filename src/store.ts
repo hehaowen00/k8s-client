@@ -80,8 +80,10 @@ export interface DockState {
 
 interface TabsState {
   tabs: Tab[];
+  /** Focused tab; while split, one of the two panes. */
   activeId: string | null;
-  /** Tab shown in the right-hand split pane, if any. */
+  /** Tabs shown in the left and right split panes; panes keep their side whichever is focused. */
+  leftId: string | null;
   splitId: string | null;
   setSplit: (id: string | null) => void;
   toggleSplit: () => void;
@@ -96,6 +98,16 @@ interface TabsState {
 }
 
 const newId = () => Math.random().toString(36).slice(2, 10);
+
+type Panes = Pick<TabsState, "activeId" | "leftId" | "splitId">;
+
+/** Focus `id`: a tab already in a pane just takes focus, any other replaces the focused pane's tab. */
+function focus(s: Panes, id: string): Partial<Panes> {
+  if (!s.splitId || id === s.leftId || id === s.splitId) return { activeId: id };
+  return s.activeId === s.splitId ? { activeId: id, splitId: id } : { activeId: id, leftId: id };
+}
+
+const NO_SPLIT = { leftId: null, splitId: null };
 
 /** Detail and logs views of the same thing are focused instead of opened twice; shells and terminals can repeat. */
 function sameView(a: NewTab, b: Tab): boolean {
@@ -194,20 +206,27 @@ export const useTabs = create<TabsState>()(
     (set, get) => ({
       tabs: [],
       activeId: null,
+      leftId: null,
       splitId: null,
-      setSplit: (id) => set((s) => ({ splitId: id && id !== s.activeId ? id : null })),
+      setSplit: (id) =>
+        set((s) => {
+          if (!id) return NO_SPLIT;
+          const leftId = s.splitId ? s.leftId : s.activeId;
+          if (!leftId || id === leftId) return {};
+          return { leftId, splitId: id, activeId: s.activeId === s.splitId ? id : s.activeId };
+        }),
       toggleSplit: () =>
         set((s) => {
-          if (s.splitId) return { splitId: null };
+          if (s.splitId) return NO_SPLIT;
           const idx = s.tabs.findIndex((t) => t.id === s.activeId);
           const other = s.tabs[idx + 1] ?? s.tabs[idx - 1];
-          return { splitId: other?.id ?? null };
+          return other ? { leftId: s.activeId, splitId: other.id } : {};
         }),
       open: (tab, opts) => {
         // The "New Tab" page is hidden from the tab strip, so keep at most one and just focus it.
         const home = tab.kind === "home" && get().tabs.find((t) => t.kind === "home");
         if (home) {
-          set({ activeId: home.id });
+          set((s) => focus(s, home.id));
           return home.id;
         }
         const dup = get().tabs.find((t) => sameView(tab, t));
@@ -217,8 +236,7 @@ export const useTabs = create<TabsState>()(
               tab.kind === "detail" && tab.view
                 ? s.tabs.map((t) => (t === dup ? { ...t, view: tab.view } : t))
                 : s.tabs,
-            activeId: opts?.background ? s.activeId : dup.id,
-            splitId: !opts?.background && s.splitId === dup.id ? s.activeId : s.splitId,
+            ...(opts?.background ? {} : focus(s, dup.id)),
           }));
           return dup.id;
         }
@@ -233,7 +251,8 @@ export const useTabs = create<TabsState>()(
           if (tab.kind !== "home" && !opts?.background && tabs[idx]?.kind === "home") tabs[idx] = newTab;
           else if (idx >= 0) tabs.splice(idx + 1, 0, newTab);
           else tabs.push(newTab);
-          return { tabs, activeId: opts?.background ? (s.activeId ?? id) : id };
+          if (opts?.background) return { tabs, activeId: s.activeId ?? id };
+          return { tabs, ...focus(s, id) };
         });
         return id;
       },
@@ -242,26 +261,24 @@ export const useTabs = create<TabsState>()(
           const idx = s.tabs.findIndex((t) => t.id === id);
           if (idx < 0) return s;
           const tabs = s.tabs.filter((t) => t.id !== id);
-          let activeId = s.activeId;
-          let splitId = s.splitId === id ? null : s.splitId;
-          if (activeId === id) {
-            // Closing the left pane: the split tab takes over.
-            activeId = splitId ?? tabs[Math.min(idx, tabs.length - 1)]?.id ?? null;
-            if (activeId === splitId) splitId = null;
+          // Closing either pane ends the split and the other pane takes over.
+          if (s.splitId && (id === s.leftId || id === s.splitId)) {
+            return { tabs, activeId: id === s.leftId ? s.splitId : s.leftId, ...NO_SPLIT };
           }
-          return { tabs, activeId, splitId };
+          const activeId = s.activeId === id ? (tabs[Math.min(idx, tabs.length - 1)]?.id ?? null) : s.activeId;
+          return { tabs, activeId };
         }),
-      closeOthers: (id) => set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), activeId: id, splitId: null })),
+      closeOthers: (id) => set((s) => ({ tabs: s.tabs.filter((t) => t.id === id), activeId: id, ...NO_SPLIT })),
       closeRight: (id) =>
         set((s) => {
           const idx = s.tabs.findIndex((t) => t.id === id);
           const tabs = s.tabs.slice(0, idx + 1);
-          const activeId = tabs.some((t) => t.id === s.activeId) ? s.activeId : id;
-          const splitId = tabs.some((t) => t.id === s.splitId) ? s.splitId : null;
-          return { tabs, activeId, splitId };
+          const kept = (x: string | null) => tabs.some((t) => t.id === x);
+          const activeId = kept(s.activeId) ? s.activeId : id;
+          const split = kept(s.leftId) && kept(s.splitId) ? {} : NO_SPLIT;
+          return { tabs, activeId, ...split };
         }),
-      // Activating the split tab swaps the panes.
-      activate: (id) => set((s) => (id === s.splitId ? { activeId: id, splitId: s.activeId } : { activeId: id })),
+      activate: (id) => set((s) => focus(s, id)),
       update: (id, patch) =>
         set((s) => ({
           tabs: s.tabs.map((t) => (t.id === id ? ({ ...t, ...patch } as Tab) : t)),
@@ -279,7 +296,7 @@ export const useTabs = create<TabsState>()(
         if (!tabs.length) return;
         const idx = tabs.findIndex((t) => t.id === activeId);
         const next = (idx + dir + tabs.length) % tabs.length;
-        set({ activeId: tabs[next].id });
+        set((s) => focus(s, tabs[next].id));
       },
     }),
     {
@@ -289,6 +306,7 @@ export const useTabs = create<TabsState>()(
       partialize: (s) => ({
         tabs: s.tabs.flatMap((t) => (t.kind === "cluster" ? [{ ...t, dock: undefined }] : [])),
         activeId: s.activeId,
+        leftId: s.leftId,
         splitId: s.splitId,
       }),
     },
@@ -298,13 +316,14 @@ export const useTabs = create<TabsState>()(
 syncNamespaces(useTabs.getState().tabs);
 // On startup, restore only cluster tabs (category + namespace); logs, shells, details and docks start fresh.
 {
-  const { tabs, activeId, splitId } = useTabs.getState();
+  const { tabs, activeId, leftId, splitId } = useTabs.getState();
   const restored = tabs.flatMap((t) => (t.kind === "cluster" ? [{ ...t, dock: undefined }] : []));
   const has = (id: string | null) => restored.some((t) => t.id === id);
+  const split = has(leftId) && has(splitId) && leftId !== splitId && (activeId === leftId || activeId === splitId);
   useTabs.setState({
     tabs: restored,
     activeId: has(activeId) ? activeId : (restored[0]?.id ?? null),
-    splitId: has(splitId) && splitId !== activeId ? splitId : null,
+    ...(split ? { leftId, splitId } : NO_SPLIT),
   });
 }
 useTabs.subscribe((s, prev) => s.tabs !== prev.tabs && syncNamespaces(s.tabs, prev.tabs));
@@ -483,3 +502,19 @@ export function openSession(item: NewDockItem, opts?: { newTab?: boolean }) {
     open(item as NewTab);
   }
 }
+
+const SIDEBAR_HIDDEN_KEY = "kubetab.sidebarHidden";
+
+/** Whether cluster views hide their resource sidebar (shared by every tab, survives restarts). */
+export const useSidebar = create<{ hidden: boolean; toggle: () => void }>((set, get) => ({
+  hidden: localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1",
+  toggle: () => {
+    const hidden = !get().hidden;
+    set({ hidden });
+    try {
+      localStorage.setItem(SIDEBAR_HIDDEN_KEY, hidden ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  },
+}));

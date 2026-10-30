@@ -23,9 +23,10 @@ const ICONS: Record<Tab["kind"], string> = {
 const OVERLAY_TITLEBAR = navigator.userAgent.includes("Mac");
 
 export function TabBar() {
-  const { tabs, activeId, splitId } = useTabs(
-    useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, splitId: s.splitId })),
+  const { tabs, activeId, leftId, splitId } = useTabs(
+    useShallow((s) => ({ tabs: s.tabs, activeId: s.activeId, leftId: s.leftId, splitId: s.splitId })),
   );
+  const inSplit = (id: string) => !!splitId && (id === leftId || id === splitId);
   const setSplit = useTabs((s) => s.setSplit);
   const activate = useTabs((s) => s.activate);
   const close = useTabs((s) => s.close);
@@ -100,7 +101,7 @@ export function TabBar() {
           return (
             <div
               key={t.id}
-              className={`tab ${t.id === activeId ? "active" : ""} ${t.id === splitId ? "split" : ""} ${dragIdx === i ? "dragging" : ""} ${over?.idx === i ? (over.after ? "drop-after" : "drop-before") : ""}`}
+              className={`tab ${t.id === activeId ? "active" : ""} ${t.id !== activeId && inSplit(t.id) ? "split" : ""} ${dragIdx === i ? "dragging" : ""} ${over?.idx === i ? (over.after ? "drop-after" : "drop-before") : ""}`}
               title={ctx && t.kind !== "cluster" ? `${tabTitle(t)} — ${contextLabel(ctx)}` : tabTitle(t)}
               draggable
               onDragStart={(e) => {
@@ -139,12 +140,12 @@ export function TabBar() {
               onContextMenu={(e) =>
                 openContextMenu(e, [
                   { label: S.tabs.duplicate, onClick: () => duplicate(t) },
-                  t.id === splitId
+                  inSplit(t.id)
                     ? { label: S.tabs.closeSplit, hint: shortcut("\\"), onClick: () => setSplit(null) }
                     : {
                         label: S.tabs.openInSplit,
                         hint: shortcut("\\"),
-                        disabled: t.id === activeId,
+                        disabled: t.id === (splitId ? leftId : activeId),
                         onClick: () => setSplit(t.id),
                       },
                   { separator: true, label: "" },

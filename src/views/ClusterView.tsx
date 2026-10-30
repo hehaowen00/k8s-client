@@ -14,6 +14,7 @@ import {
   type Tab,
   contextLabel,
   initialNamespace,
+  useSidebar,
 } from "../store";
 import {
   ALL_NAMESPACES,
@@ -33,7 +34,6 @@ import { HelmCharts, HelmReleases } from "./HelmViews";
 import { NamespacePicker } from "../components/NamespacePicker";
 import { useExtensions, type ExtPage } from "../extensions";
 import { Select } from "../components/Select";
-import { Checkbox } from "../components/Checkbox";
 import { ClusterNavContext } from "../clusterNav";
 import { S } from "../strings";
 
@@ -50,10 +50,10 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
   const contexts = useContexts();
 
   const [filter, setFilter] = useState("");
-  const [wide, setWide] = usePref("table.wide", false);
   const [selected, setSelected] = useState<Row | null>(null);
   const [counts, setCounts] = useState<{ shown: number; total: number }>({ shown: 0, total: 0 });
   const [kindFilter, setKindFilter] = useState("");
+  const sidebarHidden = useSidebar((s) => s.hidden);
   const [collapsed, setCollapsed] = usePref<Record<string, boolean>>("sidebar.collapsed", { Other: true });
 
   // Switching resource / namespace clears the selection, unless the switch was to show an object.
@@ -198,133 +198,139 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
   return (
     <ClusterNavContext.Provider value={nav}>
       <div className="cluster-view">
-        <aside className="sidebar">
-          <div className="sidebar-head">
-            <span className="context-swatch" style={{ background: contextColor(tab.context) }} />
-            <Select
-              className="select context-select"
-              value={tab.context}
-              onChange={(e) =>
-                update(tab.id, { context: e.target.value, resource: null, namespace: initialNamespace(e.target.value) })
-              }
-            >
-              {!contexts.data?.some((c) => c.name === tab.context) && (
-                <option value={tab.context}>{contextLabel(tab.context)}</option>
+        {!sidebarHidden && (
+          <aside className="sidebar">
+            <div className="sidebar-head">
+              <span className="context-swatch" style={{ background: contextColor(tab.context) }} />
+              <Select
+                className="select context-select"
+                value={tab.context}
+                onChange={(e) =>
+                  update(tab.id, {
+                    context: e.target.value,
+                    resource: null,
+                    namespace: initialNamespace(e.target.value),
+                  })
+                }
+              >
+                {!contexts.data?.some((c) => c.name === tab.context) && (
+                  <option value={tab.context}>{contextLabel(tab.context)}</option>
+                )}
+                {contexts.data?.map((c) => (
+                  <option key={c.name} value={c.name} title={c.name}>
+                    {contextLabel(c.name)}
+                  </option>
+                ))}
+              </Select>
+            </div>
+            <input
+              className="input sidebar-search"
+              placeholder={S.clusterView.findType}
+              value={kindFilter}
+              onChange={(e) => setKindFilter(e.target.value)}
+            />
+            <nav className="nav">
+              <button
+                className={`nav-item nav-top ${!tab.resource && !tab.page ? "active" : ""}`}
+                onClick={(e) => goPage(undefined, e)}
+              >
+                {S.cluster.overview}
+              </button>
+              {discovery.loading && <div className="muted small pad">{S.clusterView.discovering}</div>}
+              {discovery.error && (
+                <div className="error-box small">
+                  {discovery.error}
+                  <button className="btn btn-sm" onClick={reconnect}>
+                    {S.common.retry}
+                  </button>
+                </div>
               )}
-              {contexts.data?.map((c) => (
-                <option key={c.name} value={c.name} title={c.name}>
-                  {contextLabel(c.name)}
-                </option>
-              ))}
-            </Select>
-          </div>
-          <input
-            className="input sidebar-search"
-            placeholder={S.clusterView.findType}
-            value={kindFilter}
-            onChange={(e) => setKindFilter(e.target.value)}
-          />
-          <nav className="nav">
-            <button
-              className={`nav-item nav-top ${!tab.resource && !tab.page ? "active" : ""}`}
-              onClick={(e) => goPage(undefined, e)}
-            >
-              {S.cluster.overview}
-            </button>
-            {discovery.loading && <div className="muted small pad">{S.clusterView.discovering}</div>}
-            {discovery.error && (
-              <div className="error-box small">
-                {discovery.error}
-                <button className="btn btn-sm" onClick={reconnect}>
-                  {S.common.retry}
-                </button>
-              </div>
-            )}
-            {sections.map((s) => {
-              const isCollapsed = !kindFilter && collapsed[s.title];
-              return (
-                <div key={s.title} className="nav-section">
+              {sections.map((s) => {
+                const isCollapsed = !kindFilter && collapsed[s.title];
+                return (
+                  <div key={s.title} className="nav-section">
+                    <button
+                      className="nav-section-title"
+                      onClick={() => setCollapsed({ ...collapsed, [s.title]: !collapsed[s.title] })}
+                    >
+                      <span className={`chev ${isCollapsed ? "" : "open"}`}>▸</span>
+                      {s.title}
+                      <span className="nav-count">{s.items.length}</span>
+                    </button>
+                    {!isCollapsed &&
+                      (s.groups
+                        ? s.groups.map((g) => (
+                            <div key={g.group} className="nav-group">
+                              <div className="nav-group-title" title={g.group}>
+                                {g.group}
+                              </div>
+                              {g.items.map(resourceItem)}
+                            </div>
+                          ))
+                        : s.items.map(resourceItem))}
+                    {!isCollapsed && s.title === S.nav.network && (
+                      <button className="nav-item" onClick={() => openSingleton("portforwards")}>
+                        {S.clusterView.portForwarding}
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+              {discovery.data && (
+                <div className="nav-section">
                   <button
                     className="nav-section-title"
-                    onClick={() => setCollapsed({ ...collapsed, [s.title]: !collapsed[s.title] })}
+                    onClick={() => setCollapsed({ ...collapsed, Helm: !collapsed.Helm })}
                   >
-                    <span className={`chev ${isCollapsed ? "" : "open"}`}>▸</span>
-                    {s.title}
-                    <span className="nav-count">{s.items.length}</span>
+                    <span className={`chev ${collapsed.Helm ? "" : "open"}`}>▸</span>
+                    {S.helm.section}
                   </button>
-                  {!isCollapsed &&
-                    (s.groups
-                      ? s.groups.map((g) => (
-                          <div key={g.group} className="nav-group">
-                            <div className="nav-group-title" title={g.group}>
-                              {g.group}
-                            </div>
-                            {g.items.map(resourceItem)}
-                          </div>
-                        ))
-                      : s.items.map(resourceItem))}
-                  {!isCollapsed && s.title === S.nav.network && (
-                    <button className="nav-item" onClick={() => openSingleton("portforwards")}>
-                      {S.clusterView.portForwarding}
-                    </button>
+                  {!collapsed.Helm && (
+                    <>
+                      <button
+                        className={`nav-item ${tab.page === "releases" && !tab.resource ? "active" : ""}`}
+                        onClick={(e) => goPage("releases", e)}
+                      >
+                        {S.helm.releasesShort}
+                      </button>
+                      <button
+                        className={`nav-item ${tab.page === "charts" && !tab.resource ? "active" : ""}`}
+                        onClick={(e) => goPage("charts", e)}
+                      >
+                        {S.helm.chartsShort}
+                      </button>
+                    </>
                   )}
                 </div>
-              );
-            })}
-            {discovery.data && (
-              <div className="nav-section">
-                <button
-                  className="nav-section-title"
-                  onClick={() => setCollapsed({ ...collapsed, Helm: !collapsed.Helm })}
-                >
-                  <span className={`chev ${collapsed.Helm ? "" : "open"}`}>▸</span>
-                  {S.helm.section}
-                </button>
-                {!collapsed.Helm && (
-                  <>
-                    <button
-                      className={`nav-item ${tab.page === "releases" && !tab.resource ? "active" : ""}`}
-                      onClick={(e) => goPage("releases", e)}
-                    >
-                      {S.helm.releasesShort}
-                    </button>
-                    <button
-                      className={`nav-item ${tab.page === "charts" && !tab.resource ? "active" : ""}`}
-                      onClick={(e) => goPage("charts", e)}
-                    >
-                      {S.helm.chartsShort}
-                    </button>
-                  </>
-                )}
-              </div>
-            )}
-            {discovery.data && extPages.length > 0 && (
-              <div className="nav-section">
-                <button
-                  className="nav-section-title"
-                  onClick={() => setCollapsed({ ...collapsed, Extensions: !collapsed.Extensions })}
-                >
-                  <span className={`chev ${collapsed.Extensions ? "" : "open"}`}>▸</span>
-                  {S.palette.extensions}
-                </button>
-                {!collapsed.Extensions &&
-                  extPages.map((p) => {
-                    const key = `ext:${p.ext}:${p.title}` as const;
-                    return (
-                      <button
-                        key={key}
-                        className={`nav-item ${tab.page === key && !tab.resource ? "active" : ""}`}
-                        title={S.clusterView.fromExt(p.ext)}
-                        onClick={(e) => goPage(key, e)}
-                      >
-                        {p.title}
-                      </button>
-                    );
-                  })}
-              </div>
-            )}
-          </nav>
-        </aside>
+              )}
+              {discovery.data && extPages.length > 0 && (
+                <div className="nav-section">
+                  <button
+                    className="nav-section-title"
+                    onClick={() => setCollapsed({ ...collapsed, Extensions: !collapsed.Extensions })}
+                  >
+                    <span className={`chev ${collapsed.Extensions ? "" : "open"}`}>▸</span>
+                    {S.palette.extensions}
+                  </button>
+                  {!collapsed.Extensions &&
+                    extPages.map((p) => {
+                      const key = `ext:${p.ext}:${p.title}` as const;
+                      return (
+                        <button
+                          key={key}
+                          className={`nav-item ${tab.page === key && !tab.resource ? "active" : ""}`}
+                          title={S.clusterView.fromExt(p.ext)}
+                          onClick={(e) => goPage(key, e)}
+                        >
+                          {p.title}
+                        </button>
+                      );
+                    })}
+                </div>
+              )}
+            </nav>
+          </aside>
+        )}
 
         <main className="main">
           <div className="main-content">
@@ -354,9 +360,6 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
                   />
-                  <Checkbox checked={wide} onChange={(e) => setWide(e.target.checked)} title={S.clusterView.wideHint}>
-                    {S.clusterView.wide}
-                  </Checkbox>
                   <div className="spacer" />
                   <button
                     className="btn btn-sm"
@@ -386,7 +389,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
                       resource={tab.resource}
                       namespace={tab.resource.namespaced ? tab.namespace : ""}
                       filter={filter}
-                      wide={wide}
+                      wide
                       active={active}
                       selectedUid={selected?.uid ?? null}
                       reveal={selected?.uid.startsWith(PENDING) ? selected : null}

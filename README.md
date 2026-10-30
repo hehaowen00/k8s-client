@@ -58,6 +58,7 @@ than tab switching go to the shell while a terminal is focused (the Windows key 
 | Mod+1…9 | Jump to tab (9 = last) |
 | Mod+Shift+P, Mod+K | Command palette |
 | Mod+\\ | Toggle split view |
+| Mod+B | Show / hide the sidebar |
 | Mod+J | Minimise / restore the dock |
 | Mod+, | Settings |
 | Mod+S | Save (YAML editor) / apply (Apply Manifest) |
