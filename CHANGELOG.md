@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.2.0 — 2026-11-22
+
+### Added
+- Logs can be stopped and resumed; resuming adds what was logged while stopped.
+- Previous container logs for workloads and multi-pod logs, showing each restarted container's last run.
+- Checking several pods and pressing Logs opens their logs side by side in the dock; the dock can switch between side by side and one at a time.
+- Table columns can be resized.
+- Active port forwards on pod and service ports have a stop button.
+
+### Changed
+- New Kube Portal logo and app icon.
+- Extensions are off by default and only load after turning on Settings → Extensions → Allow Extensions.
+- Saving logs opens a save dialog.
+- The sidebar is shown or hidden per tab (Mod+B).
+- Split panes stay in tab bar order, and "Open in Right Split" is now "Open in Split".
+- Opening a resource that already has a tab focuses that tab instead of opening a duplicate.
+- Wide columns are shown by default.
+- Cluster views open on all namespaces when no default namespace is set.
+- The resource table sorts by name, then namespace.
+- Restart Across Clusters and Delete moved into the More Actions (⋯) menu in detail views.
+- The detail side panel is wider.
+
+### Fixed
+- Copying from the logs view keeps line breaks.
+
 ## 0.1.5 — 2026-10-11
 
 ### Changed
