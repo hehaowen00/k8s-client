@@ -66,6 +66,8 @@ pub struct Settings {
     /// Updater feed (a latest.json URL) and the matching minisign public key.
     pub update_endpoint: Option<String>,
     pub update_pubkey: Option<String>,
+    /// Off by default: no extension code is handed to the UI.
+    pub extensions_enabled: bool,
     /// Extension ids (folder names) turned off in Settings.
     pub disabled_extensions: Vec<String>,
     /// Local MCP server (127.0.0.1 only, bearer token).
@@ -90,6 +92,7 @@ impl Default for Settings {
             terminal_font_size: 13,
             update_endpoint: None,
             update_pubkey: None,
+            extensions_enabled: false,
             disabled_extensions: vec![],
             mcp_enabled: false,
             mcp_port: 7420,

@@ -172,7 +172,7 @@ export function SettingsView() {
           </Field>
         </section>
 
-        <ExtensionsSection />
+        <ExtensionsSection settings={settings} set={set} />
 
         <UpdatesSection settings={settings} set={set} />
 
@@ -421,7 +421,7 @@ function UpdatesSection({ settings, set }: { settings: Settings; set: (p: Partia
   );
 }
 
-function ExtensionsSection() {
+function ExtensionsSection({ settings, set }: { settings: Settings; set: (p: Partial<Settings>) => void }) {
   const { extensions, errors } = useExtensions();
   const [changed, setChanged] = useState(false);
   const [state, setState] = useState<Record<string, boolean>>({});
@@ -429,53 +429,66 @@ function ExtensionsSection() {
   return (
     <section className="settings-section">
       <h2>{S.palette.extensions}</h2>
-      <Field label={S.settings.installed} hint={S.settings.installedHint}>
-        {extensions.length === 0 ? (
-          <span className="muted small">{S.settings.noExtensions}</span>
-        ) : (
-          <div className="folders">
-            {extensions.map((x) => (
-              <div key={x.id} className="folder-row">
-                <Checkbox
-                  checked={enabled(x.id, x.enabled)}
-                  aria-label={S.settings.enableExtension(x.name)}
-                  onChange={async (e) => {
-                    const on = e.target.checked;
-                    setState({ ...state, [x.id]: on });
-                    await invoke("set_extension_enabled", { id: x.id, enabled: on }).catch((err) =>
-                      toast(String(err), "bad"),
-                    );
-                    setChanged(true);
-                  }}
-                />
-                <span className="ext-meta">
-                  <strong>{x.name}</strong> <span className="muted small">{x.version}</span>
-                  {x.description && <div className="muted small">{x.description}</div>}
-                </span>
-                {(x.error || errors[x.id]) && <div className="folder-errors">{x.error || errors[x.id]}</div>}
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="update-row">
-          <button
-            className="btn btn-sm"
-            onClick={async () => {
-              try {
-                await openPath(await invoke<string>("extensions_folder"));
-              } catch (e) {
-                toast(String(e), "bad");
-              }
-            }}
-          >
-            {S.settings.openExtensionsFolder}
-          </button>
-          <button className="btn btn-sm" onClick={() => location.reload()}>
-            {S.settings.reloadExtensions}
-          </button>
-          {changed && <span className="muted small">{S.settings.reloadToApply}</span>}
-        </div>
+      <Field label={S.settings.allowExtensions} hint={S.settings.allowExtensionsHint}>
+        <Checkbox
+          checked={settings.extensionsEnabled}
+          onChange={(e) => {
+            set({ extensionsEnabled: e.target.checked });
+            setChanged(true);
+          }}
+        >
+          {S.settings.allowExtensionsLabel}
+        </Checkbox>
+        {changed && <span className="muted small">{S.settings.reloadToApply}</span>}
       </Field>
+      {settings.extensionsEnabled && (
+        <Field label={S.settings.installed} hint={S.settings.installedHint}>
+          {extensions.length === 0 ? (
+            <span className="muted small">{S.settings.noExtensions}</span>
+          ) : (
+            <div className="folders">
+              {extensions.map((x) => (
+                <div key={x.id} className="folder-row">
+                  <Checkbox
+                    checked={enabled(x.id, x.enabled)}
+                    aria-label={S.settings.enableExtension(x.name)}
+                    onChange={async (e) => {
+                      const on = e.target.checked;
+                      setState({ ...state, [x.id]: on });
+                      await invoke("set_extension_enabled", { id: x.id, enabled: on }).catch((err) =>
+                        toast(String(err), "bad"),
+                      );
+                      setChanged(true);
+                    }}
+                  />
+                  <span className="ext-meta">
+                    <strong>{x.name}</strong> <span className="muted small">{x.version}</span>
+                    {x.description && <div className="muted small">{x.description}</div>}
+                  </span>
+                  {(x.error || errors[x.id]) && <div className="folder-errors">{x.error || errors[x.id]}</div>}
+                </div>
+              ))}
+            </div>
+          )}
+          <div className="update-row">
+            <button
+              className="btn btn-sm"
+              onClick={async () => {
+                try {
+                  await openPath(await invoke<string>("extensions_folder"));
+                } catch (e) {
+                  toast(String(e), "bad");
+                }
+              }}
+            >
+              {S.settings.openExtensionsFolder}
+            </button>
+            <button className="btn btn-sm" onClick={() => location.reload()}>
+              {S.settings.reloadExtensions}
+            </button>
+          </div>
+        </Field>
+      )}
     </section>
   );
 }

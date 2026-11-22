@@ -1,7 +1,8 @@
 //! Kube Portal extensions: folders under <app config>/extensions/<id>/ with an
 //! optional extension.json ({ name, version, description, main }) and a JS
 //! module (default: index.js). The UI imports enabled extensions at startup.
-//! Extensions are trusted code with the same access as the app (like Lens).
+//! Extensions are trusted code with the same access as the app (like Lens), so
+//! none load unless extensions are turned on in Settings (off by default).
 
 use std::path::PathBuf;
 
@@ -43,7 +44,10 @@ pub fn extensions_dir() -> Result<PathBuf> {
 pub fn list_extensions(state: State<'_, AppState>) -> Result<Vec<ExtensionInfo>> {
     let dir = extensions_dir()?;
     std::fs::create_dir_all(&dir).map_err(err)?;
-    let disabled = state.settings.lock().unwrap().disabled_extensions.clone();
+    let (allowed, disabled) = {
+        let s = state.settings.lock().unwrap();
+        (s.extensions_enabled, s.disabled_extensions.clone())
+    };
     let mut out = Vec::new();
     let mut entries: Vec<_> = std::fs::read_dir(&dir)
         .map_err(err)?
@@ -61,7 +65,7 @@ pub fn list_extensions(state: State<'_, AppState>) -> Result<Vec<ExtensionInfo>>
             .and_then(|s| serde_json::from_str(&s).ok())
             .unwrap_or_default();
         let main = manifest.main.clone().unwrap_or_else(|| "index.js".into());
-        let enabled = !disabled.contains(&id);
+        let enabled = allowed && !disabled.contains(&id);
         let mut info = ExtensionInfo {
             name: manifest.name.clone().unwrap_or_else(|| id.clone()),
             version: manifest.version.clone().unwrap_or_default(),
