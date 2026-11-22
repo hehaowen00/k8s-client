@@ -21,6 +21,12 @@ pub enum LogEvent {
     Error { message: String },
 }
 
+/// Write text to a path the user picked in a save dialog.
+#[tauri::command]
+pub async fn save_text(path: String, contents: String) -> Result<()> {
+    tokio::fs::write(&path, contents).await.map_err(err)
+}
+
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
 pub async fn stream_logs(

@@ -143,12 +143,12 @@ export function BarChart({
   const showSeconds = geo.tstep < 60 || binW < 60;
 
   return (
-    <div className="chart" ref={wrapRef}>
+    <div className="chart">
       <div className="chart-head">
         <span className="chart-title">{title}</span>
         {latest !== null && <span className="chart-value">{format(latest)}</span>}
       </div>
-      <div className="chart-plot" style={{ height }}>
+      <div className="chart-plot" ref={wrapRef} style={{ height }}>
         <svg
           width={width}
           height={height}

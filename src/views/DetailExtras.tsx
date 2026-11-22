@@ -642,7 +642,9 @@ function CrdDetails({ obj, target }: { obj: KubeObject; target: Target }) {
           res && (
             <button
               className="btn btn-xs"
-              onClick={() => open({ kind: "cluster", context: target.context, resource: res, namespace: "" })}
+              onClick={() =>
+                open({ kind: "cluster", context: target.context, resource: res, namespace: ALL_NAMESPACES })
+              }
             >
               {S.detail.browse(names.plural)}
             </button>

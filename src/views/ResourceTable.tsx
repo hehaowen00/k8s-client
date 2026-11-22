@@ -21,6 +21,7 @@ import { useSettings } from "../settings";
 import { Checkbox } from "../components/Checkbox";
 import { loadPerms } from "../permissions";
 import { S } from "../strings";
+import { openSessionsSideBySide } from "../store";
 
 const BACKGROUND_WATCH_MS = 5 * 60_000;
 
@@ -328,7 +329,7 @@ export function ResourceTable(props: Props) {
       rows = keyed.map((k) => k.row);
     } else {
       rows = filtered.sort(
-        (a, b) => collator.compare(a.namespace ?? "", b.namespace ?? "") || collator.compare(a.name, b.name),
+        (a, b) => collator.compare(a.name, b.name) || collator.compare(a.namespace ?? "", b.namespace ?? ""),
       );
     }
     return { rows, total: all.length };
@@ -482,6 +483,23 @@ export function ResourceTable(props: Props) {
           <span>
             <strong>{checkedRows.length}</strong> {S.table.selected}
           </span>
+          {isPod(resource) && (
+            <button
+              className="btn btn-sm"
+              onClick={() =>
+                openSessionsSideBySide(
+                  checkedRows.map((r) => ({
+                    kind: "logs" as const,
+                    context,
+                    namespace: r.namespace ?? "default",
+                    pod: r.name,
+                  })),
+                )
+              }
+            >
+              {S.actions.logs}
+            </button>
+          )}
           {restartable && (
             <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => bulk(restartMany)}>
               {S.actions.restart}

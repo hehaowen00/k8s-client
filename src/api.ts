@@ -190,6 +190,7 @@ function startStream<E>(
     return null;
   });
   return () => {
+    if (stopped) return;
     stopped = true;
     idPromise.then((id) => id && invoke("stop_stream", { id }));
   };
@@ -438,6 +439,8 @@ export const api = {
   applyManifest: (context: string, yaml: string, defaultNamespace: string | null) =>
     invoke<string[]>("apply_manifest", { context, yaml, defaultNamespace }),
 
+  saveText: (path: string, contents: string) => invoke<void>("save_text", { path, contents }),
+
   streamLogs: (
     opts: {
       context: string;
@@ -463,6 +466,7 @@ export const api = {
       tailLines?: number | null;
       timestamps?: boolean;
       sinceSeconds?: number | null;
+      previous?: boolean;
     },
     onEvent: (e: MultiLogEvent) => void,
   ) => startStream<MultiLogEvent>("stream_multi_logs", opts, onEvent, (message) => onEvent({ type: "error", message })),

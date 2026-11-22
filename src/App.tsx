@@ -19,7 +19,7 @@ import { AddClusterDialogHost } from "./components/AddClusterDialog";
 import { Hotbar } from "./components/Hotbar";
 import { ClusterSettingsView, SettingsView } from "./views/SettingsView";
 import { useResolvedTheme, useSettings, useSettingsBootstrap } from "./settings";
-import { dock, isDockHost, openSingleton, useSidebar } from "./store";
+import { dock, isDockHost, openSingleton, toggleSidebar } from "./store";
 import { CommandPaletteHost, openPalette } from "./components/CommandPalette";
 import { usePref } from "./hooks";
 import { loadExtensions } from "./extensions";
@@ -61,11 +61,12 @@ export default function App() {
   const [savedRatio, saveRatio] = usePref("split.ratio", 0.5);
   const [dragRatio, setDragRatio] = useState<number | null>(null);
   const splitRatio = dragRatio ?? savedRatio;
-  const split =
-    splitId && leftId && splitId !== leftId && tabs.some((t) => t.id === splitId) && tabs.some((t) => t.id === leftId)
-      ? splitId
-      : null;
-  const leftPane = split ? leftId : activeId;
+  // Panes follow the tab bar's order, whichever was split from which.
+  const leftIdx = tabs.findIndex((t) => t.id === leftId);
+  const splitIdx = tabs.findIndex((t) => t.id === splitId);
+  const isSplit = leftIdx >= 0 && splitIdx >= 0 && leftIdx !== splitIdx;
+  const leftPane = isSplit ? tabs[Math.min(leftIdx, splitIdx)].id : activeId;
+  const split = isSplit ? tabs[Math.max(leftIdx, splitIdx)].id : null;
   useSettingsBootstrap();
   useEffect(() => {
     loadExtensions();
@@ -117,7 +118,7 @@ export default function App() {
         toggleSplit();
       } else if (e.key === "b" && !e.shiftKey) {
         e.preventDefault();
-        useSidebar.getState().toggle();
+        if (activeId) toggleSidebar(activeId);
       } else if (e.key === "t" && !e.shiftKey) {
         e.preventDefault();
         open({ kind: "home" });

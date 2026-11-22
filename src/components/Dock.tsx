@@ -13,6 +13,7 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
   const d = host.dock;
   if (!d || d.items.length === 0) return null;
   const open = d.open;
+  const columns = !!d.columns && d.items.length > 1;
 
   const startResize = (e: React.MouseEvent) => {
     e.preventDefault();
@@ -65,6 +66,15 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
           ))}
         </div>
         <div className="dock-actions">
+          {d.items.length > 1 && (
+            <button
+              className={`btn btn-xs btn-ghost ${columns ? "active" : ""}`}
+              title={columns ? S.dock.asTabs : S.dock.sideBySide}
+              onClick={() => dock.setColumns(host.id, !columns)}
+            >
+              ◫
+            </button>
+          )}
           {d.activeId && (
             <button
               className="btn btn-xs btn-ghost"
@@ -87,12 +97,18 @@ export function Dock({ host, active }: { host: DockHost; active: boolean }) {
         </div>
       </div>
       {/* Items stay mounted while minimised so streams and shells keep running. */}
-      <div className="dock-body" style={{ display: open ? "flex" : "none" }}>
+      <div className={`dock-body ${columns ? "columns" : ""}`} style={{ display: open ? "flex" : "none" }}>
         {d.items.map((item) => {
-          const visible = active && open && item.id === d.activeId;
+          const shown = columns || item.id === d.activeId;
+          const visible = active && open && shown;
           const onUpdate = (patch: object) => dock.update(host.id, item.id, patch);
           return (
-            <div key={item.id} className="dock-pane" style={{ display: item.id === d.activeId ? "flex" : "none" }}>
+            <div
+              key={item.id}
+              className="dock-pane"
+              style={{ display: shown ? "flex" : "none" }}
+              onMouseDown={() => columns && item.id !== d.activeId && dock.activate(host.id, item.id)}
+            >
               {item.kind === "logs" ? (
                 <LogsView tab={item} active={visible} onUpdate={onUpdate} />
               ) : (

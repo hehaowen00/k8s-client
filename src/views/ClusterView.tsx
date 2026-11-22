@@ -14,7 +14,6 @@ import {
   type Tab,
   contextLabel,
   initialNamespace,
-  useSidebar,
 } from "../store";
 import {
   ALL_NAMESPACES,
@@ -53,7 +52,6 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
   const [selected, setSelected] = useState<Row | null>(null);
   const [counts, setCounts] = useState<{ shown: number; total: number }>({ shown: 0, total: 0 });
   const [kindFilter, setKindFilter] = useState("");
-  const sidebarHidden = useSidebar((s) => s.hidden);
   const [collapsed, setCollapsed] = usePref<Record<string, boolean>>("sidebar.collapsed", { Other: true });
 
   // Switching resource / namespace clears the selection, unless the switch was to show an object.
@@ -198,7 +196,7 @@ export function ClusterView({ tab, active }: { tab: ClusterTab; active: boolean 
   return (
     <ClusterNavContext.Provider value={nav}>
       <div className="cluster-view">
-        {!sidebarHidden && (
+        {!tab.sidebarHidden && (
           <aside className="sidebar">
             <div className="sidebar-head">
               <span className="context-swatch" style={{ background: contextColor(tab.context) }} />

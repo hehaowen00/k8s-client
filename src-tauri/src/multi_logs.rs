@@ -63,8 +63,8 @@ enum ContainerState {
     Waiting,
 }
 
-/// (container, state) pairs for the containers we want from this pod.
-fn containers_of(pod: &Pod, only: Option<&str>) -> Vec<(String, ContainerState)> {
+/// (container, state, has restarted) for the containers we want from this pod.
+fn containers_of(pod: &Pod, only: Option<&str>) -> Vec<(String, ContainerState, bool)> {
     let spec_names: Vec<String> = pod
         .spec
         .as_ref()
@@ -79,16 +79,15 @@ fn containers_of(pod: &Pod, only: Option<&str>) -> Vec<(String, ContainerState)>
         .into_iter()
         .filter(|n| only.is_none_or(|o| o == n))
         .map(|name| {
-            let st = statuses
-                .iter()
-                .find(|s| s.name == name)
-                .and_then(|s| s.state.as_ref());
+            let status = statuses.iter().find(|s| s.name == name);
+            let restarted = status.is_some_and(|s| s.restart_count > 0);
+            let st = status.and_then(|s| s.state.as_ref());
             let state = match st {
                 Some(s) if s.running.is_some() => ContainerState::Running,
                 Some(s) if s.terminated.is_some() => ContainerState::Terminated,
                 _ => ContainerState::Waiting,
             };
-            (name, state)
+            (name, state, restarted)
         })
         .collect()
 }
@@ -105,6 +104,7 @@ pub async fn stream_multi_logs(
     tail_lines: Option<i64>,
     timestamps: Option<bool>,
     since_seconds: Option<i64>,
+    previous: Option<bool>,
     channel: Channel<MultiLogEvent>,
 ) -> Result<String> {
     if selector.is_none() && pod.is_none() {
@@ -125,6 +125,8 @@ pub async fn stream_multi_logs(
         (None, None) => unreachable!(),
     };
     let timestamps = timestamps.unwrap_or(false);
+    // Previous: each restarted container's last run, fetched once and not followed.
+    let previous = previous.unwrap_or(false);
 
     tokio::spawn(async move {
         let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
@@ -194,22 +196,27 @@ pub async fn stream_multi_logs(
                     let mut sources = Vec::new();
                     for p in pods.values() {
                         let pod_name = p.metadata.name.clone().unwrap_or_default();
-                        for (cname, cstate) in containers_of(p, container.as_deref()) {
+                        for (cname, cstate, restarted) in containers_of(p, container.as_deref()) {
                             let key = (pod_name.clone(), cname.clone());
                             present.insert(key.clone());
                             let start = !active.contains_key(&key)
-                                && match cstate {
-                                    ContainerState::Running => true,
-                                    ContainerState::Terminated => !finished.contains(&key),
-                                    ContainerState::Waiting => false,
+                                && if previous {
+                                    restarted && !finished.contains(&key)
+                                } else {
+                                    match cstate {
+                                        ContainerState::Running => true,
+                                        ContainerState::Terminated => !finished.contains(&key),
+                                        ContainerState::Waiting => false,
+                                    }
                                 };
                             if start {
-                                if matches!(cstate, ContainerState::Terminated) {
+                                if previous || matches!(cstate, ContainerState::Terminated) {
                                     finished.insert(key.clone());
                                 }
                                 let lp = LogParams {
                                     container: Some(cname.clone()),
-                                    follow: true,
+                                    follow: !previous,
+                                    previous,
                                     timestamps,
                                     // Initial pods get the tail; later pods (rollouts) start from the top;
                                     // reconnects only fetch what's new.
@@ -222,9 +229,13 @@ pub async fn stream_multi_logs(
                                 active.insert(key.clone(), child.clone());
                                 spawn_stream(api.clone(), key.clone(), lp, tx.clone(), child);
                             }
+                            // Containers with no previous run have nothing to show.
+                            if previous && !restarted {
+                                continue;
+                            }
                             let state = if active.contains_key(&key) {
                                 "streaming"
-                            } else if matches!(cstate, ContainerState::Waiting) {
+                            } else if !previous && matches!(cstate, ContainerState::Waiting) {
                                 "waiting"
                             } else {
                                 "done"
@@ -240,14 +251,15 @@ pub async fn stream_multi_logs(
                         }
                         keep
                     });
-                    first = false;
                     sources.sort_by(|a, b| (&a.pod, &a.container).cmp(&(&b.pod, &b.container)));
-                    if sources != last_sources {
+                    // Always send the first list, even when empty, so the view knows it's connected.
+                    if first || sources != last_sources {
                         if channel.send(MultiLogEvent::Sources { sources: sources.clone() }).is_err() {
                             break 'main;
                         }
                         last_sources = sources;
                     }
+                    first = false;
                 }
                 Some(msg) = rx.recv() => match msg {
                     Msg::Line(l) => {

@@ -15,7 +15,7 @@ import {
   tabContext,
   tabTitle,
   useTabs,
-  useSidebar,
+  toggleSidebar,
 } from "../store";
 import { S } from "../strings";
 
@@ -54,7 +54,6 @@ export function CommandPaletteHost() {
   const listRef = useRef<HTMLDivElement>(null);
   const tabs = useTabs((s) => s.tabs);
   const activeId = useTabs((s) => s.activeId);
-  const sidebarHidden = useSidebar((s) => s.hidden);
   const active = tabs.find((t) => t.id === activeId);
   const activeCtx = active ? tabContext(active) : null;
 
@@ -154,13 +153,17 @@ export function CommandPaletteHost() {
         hint: shortcut("\\"),
         run: () => T.toggleSplit(),
       },
-      {
-        id: "sidebar",
-        group: S.palette.commands,
-        label: sidebarHidden ? S.palette.showSidebar : S.palette.hideSidebar,
-        hint: shortcut("B"),
-        run: () => useSidebar.getState().toggle(),
-      },
+      ...(active?.kind === "cluster"
+        ? [
+            {
+              id: "sidebar",
+              group: S.palette.commands,
+              label: active.sidebarHidden ? S.palette.showSidebar : S.palette.hideSidebar,
+              hint: shortcut("B"),
+              run: () => toggleSidebar(active.id),
+            },
+          ]
+        : []),
       ...(activeCtx
         ? [
             {
@@ -208,7 +211,7 @@ export function CommandPaletteHost() {
       },
     );
     return cmds;
-  }, [tabs, activeId, active, activeCtx, contexts, resources, sidebarHidden]);
+  }, [tabs, activeId, active, activeCtx, contexts, resources]);
 
   const results = useMemo(() => {
     const scored = commands

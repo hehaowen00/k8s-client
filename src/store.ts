@@ -3,6 +3,7 @@ import { createJSONStorage, persist, type StateStorage } from "zustand/middlewar
 import type { ResourceInfo } from "./api";
 import { useSettings } from "./settings";
 import { S } from "./strings";
+import { ALL_NAMESPACES } from "./util";
 
 interface TabBase {
   id: string;
@@ -18,6 +19,7 @@ export type Tab = TabBase &
         namespace: string; // "" = all namespaces
         /** Non-resource pages; only used when `resource` is null (null + no page = overview). */
         page?: "releases" | "charts" | `ext:${string}`;
+        sidebarHidden?: boolean;
         dock?: DockState;
       }
     | {
@@ -76,6 +78,8 @@ export interface DockState {
   activeId: string | null;
   open: boolean;
   height: number;
+  /** Show every item side by side instead of one at a time. */
+  columns?: boolean;
 }
 
 interface TabsState {
@@ -158,9 +162,11 @@ function syncNamespaces(tabs: Tab[], prev: Tab[] = []) {
     if (lastNamespaces()[t.context] !== t.namespace) rememberNamespace(t.context, t.namespace);
   }
 }
-/** Namespace for a freshly opened cluster view: last used, else the cluster's configured default. */
+/** Namespace for a freshly opened cluster view: last used, else the cluster's configured default, else all. */
 export function initialNamespace(context: string): string {
-  return lastNamespaces()[context] ?? useSettings.getState().settings?.clusters[context]?.defaultNamespace ?? "";
+  return (
+    lastNamespaces()[context] ?? useSettings.getState().settings?.clusters[context]?.defaultNamespace ?? ALL_NAMESPACES
+  );
 }
 
 /** localStorage that skips unchanged values and writes at most once per second (flushed when the window closes). */
@@ -477,6 +483,7 @@ export const dock = {
     })),
   setOpen: (tabId: string, open: boolean) => setDock(tabId, (d) => ({ ...d, open })),
   setHeight: (tabId: string, height: number) => setDock(tabId, (d) => ({ ...d, height })),
+  setColumns: (tabId: string, columns: boolean) => setDock(tabId, (d) => ({ ...d, columns })),
   /** Move a dock item out into its own top-level tab. */
   popOut(tabId: string, itemId: string) {
     const host = useTabs.getState().tabs.find((t) => t.id === tabId);
@@ -503,18 +510,17 @@ export function openSession(item: NewDockItem, opts?: { newTab?: boolean }) {
   }
 }
 
-const SIDEBAR_HIDDEN_KEY = "kubetab.sidebarHidden";
+/** Open several sessions side by side in the active tab's dock (each in its own tab when there's no dock). */
+export function openSessionsSideBySide(items: NewDockItem[]) {
+  const { tabs, activeId } = useTabs.getState();
+  const host = tabs.find((t) => t.id === activeId);
+  if (!isDockHost(host)) return items.forEach((item) => openSession(item, { newTab: true }));
+  for (const item of items) dock.add(host.id, item);
+  if (items.length > 1) dock.setColumns(host.id, true);
+}
 
-/** Whether cluster views hide their resource sidebar (shared by every tab, survives restarts). */
-export const useSidebar = create<{ hidden: boolean; toggle: () => void }>((set, get) => ({
-  hidden: localStorage.getItem(SIDEBAR_HIDDEN_KEY) === "1",
-  toggle: () => {
-    const hidden = !get().hidden;
-    set({ hidden });
-    try {
-      localStorage.setItem(SIDEBAR_HIDDEN_KEY, hidden ? "1" : "0");
-    } catch {
-      /* ignore */
-    }
-  },
-}));
+/** Show or hide a cluster tab's resource sidebar. */
+export function toggleSidebar(id: string) {
+  const t = useTabs.getState().tabs.find((x) => x.id === id);
+  if (t?.kind === "cluster") useTabs.getState().update(id, { sidebarHidden: !t.sidebarHidden });
+}

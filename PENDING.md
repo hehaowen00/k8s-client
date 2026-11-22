@@ -6,4 +6,6 @@
 
 ## Next
 
+- **Side-by-side logs prototype** (2026-10-30, ad62888): the dock in `src/components/Dock.tsx` can show all its items as columns (◫ in the dock bar), and checking pods in the table then pressing Logs opens them side by side. Not yet tried in the app. Open questions: equal-width columns only (no dragging the dividers between them); no way to stack logs vertically or choose which items share the split; the dock may need a maximise to give logs the full tab height; the side-by-side setting isn't restored because docks aren't saved across restarts.
+
 ## Later

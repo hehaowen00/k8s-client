@@ -153,6 +153,7 @@ pub fn run() {
             nodeops::trigger_cronjob,
             kube_ops::apply_manifest,
             streams::stream_logs,
+            streams::save_text,
             multi_logs::stream_multi_logs,
             portforward::start_port_forward,
             portforward::stop_port_forward,

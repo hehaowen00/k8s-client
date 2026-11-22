@@ -6,6 +6,8 @@ import { hasAnsi, parseAnsi, stripAnsi } from "../ansi";
 import { Select } from "../components/Select";
 import { Checkbox } from "../components/Checkbox";
 import { S } from "../strings";
+import { save as saveDialog } from "@tauri-apps/plugin-dialog";
+import { errorDialog } from "../components/Dialogs";
 
 const MAX_LINES = 100_000;
 const LINE_HEIGHT = 18;
@@ -216,10 +218,27 @@ export function LogsView({
   const [filterMode, setFilterMode] = useState(false);
   const [regex, setRegex] = usePref("logs.regex", false);
   const [podFilter, setPodFilter] = useState("");
-  const [status, setStatus] = useState<{ state: "connecting" | "streaming" | "ended" | "error"; message?: string }>({
+  const [status, setStatus] = useState<{
+    state: "connecting" | "streaming" | "stopped" | "ended" | "error";
+    message?: string;
+  }>({
     state: "connecting",
   });
   const [nonce, setNonce] = useState(0);
+  // Stop keeps the received lines; resume appends what was logged since the stop.
+  const cancelRef = useRef<() => void>(() => {});
+  const stoppedAt = useRef(0);
+  const resuming = useRef(false);
+  const [resumeN, setResumeN] = useState(0);
+  const stop = () => {
+    cancelRef.current();
+    stoppedAt.current = Date.now();
+    setStatus({ state: "stopped" });
+  };
+  const resume = () => {
+    resuming.current = true;
+    setResumeN((n) => n + 1);
+  };
   const [sources, setSources] = useState<LogSource[]>([]);
 
   const linesRef = useRef<Line[]>([]);
@@ -261,54 +280,59 @@ export function LogsView({
   const ready = multi || !!container || !pod.loading;
   useEffect(() => {
     if (!ready) return;
-    linesRef.current = [];
-    srcRef.current = { list: [], index: new Map() };
-    setSources([]);
-    setVersion((v) => v + 1);
-    setStatus({ state: "connecting" });
-    const tailLines = tail > 0 ? tail : null;
-    const sinceSeconds = since > 0 ? since : null;
-    if (multi) {
-      return api.streamMultiLogs(
-        {
-          context: tab.context,
-          namespace: tab.namespace,
-          selector: workload?.selector ?? null,
-          pod: workload ? null : tab.pod,
-          container: container === ALL ? null : container,
-          tailLines,
-          timestamps,
-          sinceSeconds,
-        },
-        (e) => {
-          if (e.type === "lines") {
-            push(e.lines.map((l) => toLine(srcIndex(l.pod, l.container), l.line)));
-          } else if (e.type === "sources") {
-            setSources(e.sources);
-            setStatus((s) => (s.state === "error" || s.state === "connecting" ? { state: "streaming" } : s));
-          } else {
-            setStatus({ state: "error", message: e.message });
-          }
-        },
-      );
+    const append = resuming.current;
+    resuming.current = false;
+    if (!append) {
+      linesRef.current = [];
+      srcRef.current = { list: [], index: new Map() };
+      setSources([]);
+      setVersion((v) => v + 1);
     }
-    return api.streamLogs(
-      {
-        context: tab.context,
-        namespace: tab.namespace,
-        pod: tab.pod!,
-        container,
-        tailLines,
-        previous,
-        timestamps,
-        sinceSeconds,
-      },
-      (e) => {
-        if (e.type === "lines") push(e.lines.map((l) => toLine(-1, l)));
-        else if (e.type === "end") setStatus({ state: "ended" });
-        else setStatus({ state: "error", message: e.message });
-      },
-    );
+    setStatus({ state: "connecting" });
+    const tailLines = append ? null : tail > 0 ? tail : null;
+    const sinceSeconds = append ? Math.ceil((Date.now() - stoppedAt.current) / 1000) : since > 0 ? since : null;
+    cancelRef.current = multi
+      ? api.streamMultiLogs(
+          {
+            context: tab.context,
+            namespace: tab.namespace,
+            selector: workload?.selector ?? null,
+            pod: workload ? null : tab.pod,
+            container: container === ALL ? null : container,
+            tailLines,
+            timestamps,
+            sinceSeconds,
+            previous,
+          },
+          (e) => {
+            if (e.type === "lines") {
+              push(e.lines.map((l) => toLine(srcIndex(l.pod, l.container), l.line)));
+            } else if (e.type === "sources") {
+              setSources(e.sources);
+              setStatus((s) => (s.state === "error" || s.state === "connecting" ? { state: "streaming" } : s));
+            } else {
+              setStatus({ state: "error", message: e.message });
+            }
+          },
+        )
+      : api.streamLogs(
+          {
+            context: tab.context,
+            namespace: tab.namespace,
+            pod: tab.pod!,
+            container,
+            tailLines,
+            previous,
+            timestamps,
+            sinceSeconds,
+          },
+          (e) => {
+            if (e.type === "lines") push(e.lines.map((l) => toLine(-1, l)));
+            else if (e.type === "end") setStatus({ state: "ended" });
+            else setStatus({ state: "error", message: e.message });
+          },
+        );
+    return cancelRef.current;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     tab.context,
@@ -321,6 +345,7 @@ export function LogsView({
     previous,
     timestamps,
     nonce,
+    resumeN,
     ready,
   ]);
 
@@ -424,13 +449,18 @@ export function LogsView({
   const end = Math.min(shown.length, Math.ceil((scroll.top + scroll.height) / LINE_HEIGHT) + 20);
 
   const title = workload ? `${workload.kind.toLowerCase()}/${workload.name}` : tab.pod;
-  const download = () => {
+  const download = async () => {
+    const path = await saveDialog({
+      defaultPath: `${(title ?? "logs").replace("/", "-")}${container && container !== ALL ? "-" + container : ""}.log`,
+      filters: [{ name: S.logs.logFiles, extensions: ["log", "txt"] }],
+    });
+    if (!path) return;
     const text = linesRef.current.map((l) => (prefix(l) ? `[${prefix(l)}] ${l.text}` : l.text)).join("\n");
-    const a = document.createElement("a");
-    a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
-    a.download = `${(title ?? "logs").replace("/", "-")}${container && container !== ALL ? "-" + container : ""}.log`;
-    a.click();
-    URL.revokeObjectURL(a.href);
+    try {
+      await api.saveText(path, text);
+    } catch (e) {
+      void errorDialog(String(e));
+    }
   };
 
   // Wrap mode only renders the newest WRAP_LIMIT lines, so only those count as matches.
@@ -485,16 +515,15 @@ export function LogsView({
     searchError,
     matchCount,
     curLine,
+    status.state,
   ]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Shown inline when the toolbar is wide, inside the ⋯ menu when narrow.
   const toggles = (
     <>
-      {!multi && (
-        <Checkbox checked={previous} onChange={(e) => setPrevious(e.target.checked)}>
-          {S.logs.previous}
-        </Checkbox>
-      )}
+      <Checkbox checked={previous} onChange={(e) => setPrevious(e.target.checked)}>
+        {S.logs.previous}
+      </Checkbox>
       <Checkbox checked={wrap} onChange={(e) => setWrap(e.target.checked)}>
         {S.logs.wrap}
       </Checkbox>
@@ -503,7 +532,15 @@ export function LogsView({
       </Checkbox>
     </>
   );
+  const live = status.state === "connecting" || status.state === "streaming";
   const actions: [string, () => void, boolean?][] = [
+    ...(previous
+      ? []
+      : status.state === "stopped"
+        ? [[S.logs.resume, resume] as [string, () => void]]
+        : live
+          ? [[S.logs.stop, stop] as [string, () => void]]
+          : []),
     [S.terminal.reconnect, () => setNonce((n) => n + 1)],
     [S.logs.save, download],
     [
@@ -749,16 +786,17 @@ export function LogsView({
         />
         {status.state === "connecting" && S.clusterView.connecting}
         {status.state === "streaming" &&
-          (multi
-            ? S.logs.streamingMulti(streaming, sources.length, workload ? podNames.length : null)
-            : previous
-              ? S.logs.previousLogs
+          (previous
+            ? S.logs.previousLogs
+            : multi
+              ? S.logs.streamingMulti(streaming, sources.length, workload ? podNames.length : null)
               : S.logs.streaming)}
+        {status.state === "stopped" && S.logs.stopped}
         {status.state === "ended" && S.logs.ended}
         {status.state === "error" && <span className="tone-bad">{status.message}</span>}
         {pod.error && <span className="tone-bad">{pod.error}</span>}
         {multi && status.state === "streaming" && sources.length === 0 && (
-          <span className="muted">{S.logs.noPods}</span>
+          <span className="muted">{previous ? S.logs.noRestarts : S.logs.noPods}</span>
         )}
         <span className="spacer" />
         <span className="muted">{S.logs.lineCount(linesRef.current.length)}</span>

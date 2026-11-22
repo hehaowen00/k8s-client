@@ -1,6 +1,7 @@
 import { shortcut } from "../keys";
 import { useEffect, useMemo, useState } from "react";
 import { restartAcrossDialog } from "../components/RestartAcrossDialog";
+import { openContextMenu } from "../components/ContextMenu";
 import {
   api,
   EVENT_RESOURCE,
@@ -195,18 +196,9 @@ export function DetailView(props: Props) {
             </button>
           )}
           {isRestartable(resource) && (
-            <>
-              <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => restartTarget(target)}>
-                {S.actions.restart}
-              </button>
-              <button
-                className="btn btn-sm"
-                title={S.detail.restartAcrossHint}
-                onClick={() => restartAcrossDialog(target)}
-              >
-                {S.restartAcross.title}
-              </button>
-            </>
+            <button className="btn btn-sm" {...deny(perms.patch)} onClick={() => restartTarget(target)}>
+              {S.actions.restart}
+            </button>
           )}
           {compact && (
             <button
@@ -218,13 +210,27 @@ export function DetailView(props: Props) {
             </button>
           )}
           <button
-            className="btn btn-sm btn-danger-ghost"
-            {...deny(perms.delete)}
-            onClick={async () => {
-              if ((await deleteTarget(target)) && compact) props.onClose?.();
+            className="btn btn-sm btn-icon"
+            title={S.detail.moreActions}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              const r = e.currentTarget.getBoundingClientRect();
+              openContextMenu({ clientX: r.left, clientY: r.bottom + 4, preventDefault() {} }, [
+                ...(isRestartable(resource)
+                  ? [{ label: S.restartAcross.title, onClick: () => restartAcrossDialog(target) }]
+                  : []),
+                {
+                  label: S.actions.delete,
+                  danger: true,
+                  disabled: !perms.delete,
+                  onClick: async () => {
+                    if ((await deleteTarget(target)) && compact) props.onClose?.();
+                  },
+                },
+              ]);
             }}
           >
-            {S.actions.delete}
+            ⋯
           </button>
           {compact && props.onClose && (
             <button className="btn btn-sm btn-ghost btn-icon" onClick={props.onClose} title={S.common.close}>
