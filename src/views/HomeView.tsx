@@ -1,6 +1,6 @@
 import { backgroundClickLabel, isBackgroundClick, nextTabLabel, shortcut } from "../keys";
 import { useState } from "react";
-import logo from "../assets/logo.png";
+import logo from "../assets/logo.svg";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { invoke } from "@tauri-apps/api/core";
 import { api, type FolderInfo } from "../api";
