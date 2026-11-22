@@ -1,8 +1,27 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="768" height="768" viewBox="0 0 768 768">
-  <rect width="768" height="768" rx="100" fill="#326ce5"/>
-  <polygon points="204,190 314,128 314,637 204,567" fill="#e4e4e4" fill-opacity="0.86"/>
-  <polygon points="204,190 314,128 314,232" fill="#f7f7f7"/>
-  <polygon points="424,637 564,637 314,395 314,530.5" fill="#ffffff"/>
-  <polygon points="424,268 564,268 314,510 314,374.5" fill="#dedede" fill-opacity="0.86"/>
-  <polygon points="314,395 314,510 373.4,452.5" fill="#f7f7f7"/>
+  <defs>
+    <linearGradient id="tile" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d2232"/>
+      <stop offset="1" stop-color="#0a0d16"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.32" cy="0.12" r="0.6">
+      <stop offset="0" stop-color="#3a4a6e" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#3a4a6e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ring" x1="0.1" y1="0.95" x2="0.95" y2="0.25">
+      <stop offset="0" stop-color="#5fd6e8"/>
+      <stop offset="0.5" stop-color="#4f86ee"/>
+      <stop offset="1" stop-color="#8a63f2"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#fff" stop-opacity="0.18"/>
+      <stop offset="0.5" stop-color="#fff" stop-opacity="0.04"/>
+      <stop offset="1" stop-color="#fff" stop-opacity="0.08"/>
+    </linearGradient>
+  </defs>
+  <rect width="768" height="768" rx="150" fill="url(#tile)"/>
+  <rect width="768" height="768" rx="150" fill="url(#glow)"/>
+  <rect x="2" y="2" width="764" height="764" rx="148" fill="none" stroke="url(#rim)" stroke-width="4"/>
+  <circle cx="384" cy="384" r="316" fill="none" stroke="url(#ring)" stroke-width="14"/>
+  <path d="M232 248H320V364L422 248H530L402 384L536 520H424L320 410V520H232Z" fill="#f4f5fa"/>
 </svg>
