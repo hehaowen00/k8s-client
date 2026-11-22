@@ -1,5 +1,7 @@
 # Kube Portal
 
+![](logo.webp)
+
 A Kubernetes IDE in the spirit of Lens, built with Tauri 2 + React. Unlike Lens, everything opens in **tabs**,
 so you can keep several clusters, resource lists, logs, shells and Helm releases open side by side (or in a
 split view).
@@ -10,7 +12,7 @@ Feature parity with Lens is tracked item by item in [`ROADMAP.md`](ROADMAP.md).
 
 - **Tabs & layout**: any mix of cluster views, object details, logs, shells, terminals, manifests, port
   forwards and settings. Drag to reorder, middle-click to close, right-click to duplicate / close others /
-  open in a **right split**. Tabs are restored on restart. A **command palette** (Mod+Shift+P / Mod+K)
+  open in a **split**. Tabs are restored on restart. A **command palette** (Mod+Shift+P / Mod+K)
   jumps to any cluster, tab, resource type or command. Pinned clusters live in a **hotbar**.
 - **Dock**: logs, shells, attach sessions and terminals open in a dock at the bottom of the tab you're
   working in, as sub-tabs. Every cluster or detail tab has its own dock, so several tabs on the same
